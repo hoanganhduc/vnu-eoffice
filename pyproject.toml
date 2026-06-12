@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vnu-eoffice"
+version = "0.1.0"
+description = "Retrieve, analyse, and alert on VNU e-office (SELAB NetOffice) documents — fully local."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Duc A. Hoang" }]
+keywords = ["vnu", "eoffice", "selab", "netoffice", "document-management", "telegram"]
+dependencies = [
+    "requests>=2.25",
+    "beautifulsoup4>=4.9",
+]
+
+[project.optional-dependencies]
+# Optional Vietnamese OCR for scanned-PDF text extraction.
+ocr = ["pymupdf>=1.23", "pytesseract>=0.3"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+vnu-eoffice = "vnu_eoffice.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/hoanganhduc/vnu-eoffice"
+Issues = "https://github.com/hoanganhduc/vnu-eoffice/issues"
+
+[tool.setuptools]
+packages = ["vnu_eoffice"]

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Local runtime state and (confidential) downloaded documents — never commit
+state/
+documents/
+*.log
+data/
+
+# Secrets are read from env or a local secrets file — never store them here
+secrets.json
+.env
+
+# Scratch / reverse-engineering probes
+probe_*.py
+explore*.py
+test_listvb.py
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
