@@ -13,6 +13,9 @@ state/
 documents/
 *.log
 data/
+.github/vnu-eoffice-runtime/status.json
+.github/vnu-eoffice-runtime/documents/
+.github/vnu-eoffice-runtime/*.log
 
 # Secrets are read from env or a local secrets file — never store them here
 secrets.json

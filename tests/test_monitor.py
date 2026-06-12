@@ -3,10 +3,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from vnu_eoffice import config
 from vnu_eoffice.models import Document
-from vnu_eoffice.monitor import _handle_alert, load_seen, run_once, save_seen
+from vnu_eoffice.monitor import HASHED_SEEN_PREFIX, _handle_alert, load_seen, run_once, save_seen
 
 
 def doc(intid="1", subject="hỏa tốc", module="den"):
@@ -130,6 +131,29 @@ class TestMonitorState(TempConfigMixin, unittest.TestCase):
         self.assertFalse(result.errors)
         self.assertEqual(result.new_count, 2)
         self.assertEqual([call[1] for call in client.calls], [1, 2])
+
+    def test_hashed_seen_state_does_not_store_raw_document_ids(self):
+        with patch.dict(
+            "os.environ",
+            {"VNU_HASH_SEEN_IDS": "1", "VNU_STATE_HMAC_KEY": "test-key"},
+        ):
+            result = run_once(
+                modules=("den",),
+                client=FakeClient({"den": [doc("123456")]}),
+                notify=False,
+            )
+            self.assertEqual(result.baseline_modules, ["den"])
+            state = load_seen()
+            self.assertEqual(len(state["den"]), 1)
+            self.assertTrue(state["den"][0].startswith(HASHED_SEEN_PREFIX))
+            self.assertNotIn("123456", config.SEEN_FILE.read_text())
+
+            result = run_once(
+                modules=("den",),
+                client=FakeClient({"den": [doc("123456")]}),
+                notify=False,
+            )
+            self.assertEqual(result.new_count, 0)
 
 
 class TestAlertCleanup(unittest.TestCase):

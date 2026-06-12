@@ -6,6 +6,8 @@ runs alert only on genuinely new documents that meet the importance threshold.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,6 +20,7 @@ from .models import Document
 from .notify import TelegramNotifier, esc
 
 SEEN_CAP = 4000  # remembered intids per module (newest kept)
+HASHED_SEEN_PREFIX = "hmac-sha256:"
 
 
 # -- dedup state -------------------------------------------------------------
@@ -32,6 +35,17 @@ def save_seen(state: dict) -> None:
     config.ensure_dirs()
     config.write_private_text(config.SEEN_FILE,
                               json.dumps(state, ensure_ascii=False, indent=0))
+
+
+def seen_state_id(intid: str) -> str:
+    value = str(intid)
+    if not config.hash_seen_ids_enabled():
+        return value
+    key = config.get_seen_hmac_key()
+    if not key:
+        raise RuntimeError("Missing HMAC key for hashed seen-state ids.")
+    digest = hmac.new(str(key).encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+    return HASHED_SEEN_PREFIX + digest
 
 
 def initialized_modules(state: dict) -> set[str]:
@@ -141,14 +155,15 @@ def run_once(
         except Exception as e:
             result.errors.append(f"[{module}] list failed: {e}")
             continue
+        doc_state_ids = {d.intid: seen_state_id(d.intid) for d in docs}
         seen_ids = set(seen.get(module, []))
-        new_docs = [d for d in docs if d.intid not in seen_ids]
+        new_docs = [d for d in docs if doc_state_ids[d.intid] not in seen_ids]
         result.new_count += len(new_docs)
 
         if module not in initialized:
             result.baseline_modules.append(module)
             result.baseline_count += len(docs)
-            seen[module] = _merge_seen([d.intid for d in docs], seen.get(module, []))
+            seen[module] = _merge_seen([doc_state_ids[d.intid] for d in docs], seen.get(module, []))
             remember_module_initialized(seen, module)
             continue
 
@@ -164,11 +179,11 @@ def run_once(
                                       download, delete_after, send_files, dry_run,
                                       require_delivery=notify))
                 except Exception as e:
-                    failed_ids.add(doc.intid)
-                    result.errors.append(f"[{module}] alert {doc.intid} failed: {e}")
+                    failed_ids.add(doc_state_ids[doc.intid])
+                    result.errors.append(f"[{module}] alert delivery failed: {e}")
 
         # Update remembered ids (page is newest-first; keep newest SEEN_CAP).
-        ids_to_remember = [d.intid for d in docs if d.intid not in failed_ids]
+        ids_to_remember = [doc_state_ids[d.intid] for d in docs if doc_state_ids[d.intid] not in failed_ids]
         seen[module] = _merge_seen(ids_to_remember, seen.get(module, []))
 
     if not dry_run:

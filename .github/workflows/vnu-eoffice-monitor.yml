@@ -19,6 +19,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      VNU_HASH_SEEN_IDS: "1"
       VNU_DATA_DIR: ${{ github.workspace }}/.github/vnu-eoffice-runtime
       VNU_DOCS_DIR: /tmp/vnu-eoffice-documents
     steps:
@@ -61,47 +62,18 @@ jobs:
             --min-level MEDIUM \
             --quiet
 
-      - name: Update monitor status
-        if: always()
+      - name: Commit hashed monitor state
+        if: steps.preflight.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .github/vnu-eoffice-runtime
-          python - <<'PY'
-          import json
-          import os
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          ready = os.environ.get("READY") == "true"
-          outcome = os.environ.get("MONITOR_OUTCOME") if ready else "skipped_missing_required_secrets"
-          status = {
-              "last_run_utc": datetime.now(timezone.utc).isoformat(),
-              "event": os.environ.get("GITHUB_EVENT_NAME"),
-              "run_id": os.environ.get("GITHUB_RUN_ID"),
-              "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
-              "monitor_outcome": outcome,
-          }
-          Path(".github/vnu-eoffice-runtime/status.json").write_text(
-              json.dumps(status, indent=2) + "\n",
-              encoding="utf-8",
-          )
-          PY
-        env:
-          READY: ${{ steps.preflight.outputs.ready }}
-          MONITOR_OUTCOME: ${{ steps.monitor.outcome }}
-
-      - name: Commit monitor state
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
+          if [ ! -f .github/vnu-eoffice-runtime/state/seen.json ]; then
+            echo "No monitor state file was written."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f .github/vnu-eoffice-runtime/status.json
-          if [ -f .github/vnu-eoffice-runtime/state/seen.json ]; then
-            git add -f .github/vnu-eoffice-runtime/state/seen.json
-          fi
+          git add -f .github/vnu-eoffice-runtime/state/seen.json
           if git diff --cached --quiet; then
             echo "No monitor state changes to commit."
           else

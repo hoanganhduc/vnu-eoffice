@@ -135,3 +135,17 @@ def get_credentials() -> tuple[str, str]:
 def get_telegram_token() -> str | None:
     secrets = load_secrets()
     return os.environ.get("TELEGRAM_BOT_TOKEN") or secrets.get("TELEGRAM_BOT_TOKEN")
+
+
+def hash_seen_ids_enabled() -> bool:
+    return os.environ.get("VNU_HASH_SEEN_IDS", "").lower() in {"1", "true", "yes", "on"}
+
+
+def get_seen_hmac_key() -> str | None:
+    secrets = load_secrets()
+    return (
+        os.environ.get("VNU_STATE_HMAC_KEY")
+        or secrets.get("VNU_STATE_HMAC_KEY")
+        or os.environ.get("VNU_EOFFICE_PASSWORD")
+        or secrets.get("VNU_EOFFICE_PASSWORD")
+    )
