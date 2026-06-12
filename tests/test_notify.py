@@ -1,10 +1,11 @@
 """Offline tests for Telegram response handling."""
+import os
 import unittest
 from unittest.mock import patch
 
 import requests
 
-from vnu_eoffice.notify import TelegramError, TelegramNotifier
+from vnu_eoffice.notify import TelegramError, TelegramNotifier, load_chat_id
 
 
 class Response:
@@ -24,6 +25,10 @@ class Response:
 
 
 class TestTelegramNotifier(unittest.TestCase):
+    def test_chat_id_uses_environment(self):
+        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "env-chat"}):
+            self.assertEqual(load_chat_id(), "env-chat")
+
     def test_ok_false_raises(self):
         with patch("vnu_eoffice.notify.requests.post",
                    return_value=Response({"ok": False, "description": "Bad Request"})):

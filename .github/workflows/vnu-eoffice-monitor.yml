@@ -20,6 +20,7 @@ jobs:
       VNU_EOFFICE_PASSWORD: ${{ secrets.VNU_EOFFICE_PASSWORD }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       VNU_DATA_DIR: ${{ github.workspace }}/.github/vnu-eoffice-runtime
       VNU_DOCS_DIR: /tmp/vnu-eoffice-documents
       VNU_MONITOR_CRON: "17 */4 * * *"
@@ -101,9 +102,9 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/vnu-eoffice-runtime/status.json
+          git add -f .github/vnu-eoffice-runtime/status.json
           if [ -f .github/vnu-eoffice-runtime/state/seen.json ]; then
-            git add .github/vnu-eoffice-runtime/state/seen.json
+            git add -f .github/vnu-eoffice-runtime/state/seen.json
           fi
           if git diff --cached --quiet; then
             echo "No monitor state changes to commit."

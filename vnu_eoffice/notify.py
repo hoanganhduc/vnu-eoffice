@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 from pathlib import Path
 
 import requests
@@ -88,6 +89,8 @@ class TelegramNotifier:
 
 # -- chat-id persistence -----------------------------------------------------
 def load_chat_id() -> str | None:
+    if os.environ.get("TELEGRAM_CHAT_ID"):
+        return os.environ["TELEGRAM_CHAT_ID"]
     secrets = config.load_secrets()
     if secrets.get("TELEGRAM_CHAT_ID"):
         return str(secrets["TELEGRAM_CHAT_ID"])
