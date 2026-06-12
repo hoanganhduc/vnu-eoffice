@@ -14,7 +14,7 @@ Default secrets file:
 ~/.config/vnu-eoffice/secrets.json
 ```
 
-Override path:
+Override path explicitly:
 
 ```bash
 export VNU_SECRETS_FILE=/path/to/secrets.json
@@ -38,6 +38,15 @@ export VNU_EOFFICE_USERNAME='your-office-account'
 export VNU_EOFFICE_PASSWORD='your-password'
 export TELEGRAM_BOT_TOKEN='123456:ABC-...'
 export TELEGRAM_CHAT_ID='optional-chat-id'
+```
+
+`VNU_BASE_URL` is intentionally restricted to `https://eoffice.vnu.edu.vn/qlvb/`
+for normal use because login posts your Office-account password. For a trusted
+test system only, set:
+
+```bash
+export VNU_ALLOW_NON_VNU_BASE_URL=1
+export VNU_BASE_URL='https://trusted-test-host/qlvb/'
 ```
 
 ## Runtime Paths
@@ -127,11 +136,20 @@ Delete local attachment copies after alerting:
 vnu-eoffice monitor --once --download --delete-after
 ```
 
+When `--delete-after` is set, downloaded files are removed even if notification
+delivery fails. The next retry can download them again if needed.
+
 Send files to Telegram only if you intentionally want document contents to leave
 the machine:
 
 ```bash
 vnu-eoffice monitor --once --download --send-files
+```
+
+Use quiet output for cron-style logs:
+
+```bash
+vnu-eoffice monitor --once --quiet
 ```
 
 ## Scheduling
@@ -147,6 +165,11 @@ Install recurring monitoring every 15 minutes:
 ```bash
 vnu-eoffice schedule --every 15
 ```
+
+Scheduled jobs add `--quiet` automatically, so local logs contain counts and
+errors rather than alert subject lines. Intervals must be positive. Values above
+59 minutes must be whole hours, such as `60` or `120`; ambiguous intervals such
+as `90` are rejected.
 
 Remove the installed schedule:
 
@@ -179,7 +202,7 @@ Thresholds:
 - Metadata alerts go to Telegram when notification is enabled.
 - Attachments are not downloaded unless `--download` is passed.
 - Attachment contents are not sent to Telegram unless `--send-files` is passed.
-- `--delete-after` removes downloaded local copies after the alert flow.
+- `--delete-after` removes downloaded local copies after the alert attempt.
 - No document text is sent to external AI services by this package.
 
 ## Troubleshooting

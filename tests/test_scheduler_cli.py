@@ -50,6 +50,29 @@ class TestCliValidation(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args(["schedule", "--preview", "--every", "0"])
 
+    def test_search_command_parses_keywords(self):
+        parser = build_parser()
+        args = parser.parse_args(["search", "hop", "khan", "--modules", "den,di"])
+        self.assertEqual(args.keywords, ["hop", "khan"])
+        self.assertEqual(args.modules, ("den", "di"))
+        self.assertEqual(args.pages, config.DEFAULT_FETCH_PAGES)
+
+    def test_search_command_accepts_pages(self):
+        parser = build_parser()
+        args = parser.parse_args(["search", "hop", "--pages", "4"])
+        self.assertEqual(args.pages, 4)
+
+    def test_download_accepts_repeated_ids(self):
+        parser = build_parser()
+        args = parser.parse_args(["download", "--module", "den", "--id", "1", "--id", "di:2"])
+        self.assertEqual(args.ids, ["1", "di:2"])
+
+    def test_send_accepts_delete_after(self):
+        parser = build_parser()
+        args = parser.parse_args(["send", "--id", "den:1", "--delete-after"])
+        self.assertEqual(args.ids, ["den:1"])
+        self.assertTrue(args.delete_after)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,11 +26,15 @@ class FakeClient:
     def __init__(self, docs_by_module=None, fail_modules=()):
         self.docs_by_module = docs_by_module or {}
         self.fail_modules = set(fail_modules)
+        self.calls = []
 
-    def recent(self, module, limit=60, **kw):
+    def list_documents(self, module, page=1, limit=60, **kw):
+        self.calls.append((module, page, limit, kw))
         if module in self.fail_modules:
             raise RuntimeError("list failed")
-        return self.docs_by_module.get(module, [])
+        docs = self.docs_by_module.get(module, [])
+        start = (page - 1) * limit
+        return len(docs), docs[start:start + limit]
 
 
 class FailingNotifier:
@@ -110,6 +114,22 @@ class TestMonitorState(TempConfigMixin, unittest.TestCase):
     def test_empty_modules_rejected(self):
         with self.assertRaises(ValueError):
             run_once(modules=(), client=FakeClient(), notify=False)
+
+    def test_monitor_fetches_multiple_pages(self):
+        save_seen({"_initialized_modules": ["den"], "den": []})
+        client = FakeClient({"den": [doc("1"), doc("2")]})
+        result = run_once(
+            modules=("den",),
+            limit=1,
+            pages=2,
+            min_level="LOW",
+            client=client,
+            notifier=OkNotifier(),
+            notify=True,
+        )
+        self.assertFalse(result.errors)
+        self.assertEqual(result.new_count, 2)
+        self.assertEqual([call[1] for call in client.calls], [1, 2])
 
 
 class TestAlertCleanup(unittest.TestCase):

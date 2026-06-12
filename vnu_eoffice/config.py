@@ -14,6 +14,7 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/120 Safari/537.36"
 )
 REQUEST_TIMEOUT = int(os.environ.get("VNU_TIMEOUT", "30"))
+DEFAULT_FETCH_PAGES = int(os.environ.get("VNU_FETCH_PAGES", "2"))
 
 
 def validate_base_url(base_url: str) -> None:

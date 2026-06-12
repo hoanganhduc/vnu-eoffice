@@ -3,9 +3,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from . import config, scheduler
 from .client import VnuClient
+from .documents import (
+    download_documents,
+    fetch_documents,
+    parse_document_refs,
+    search_documents,
+    send_documents,
+)
 from .importance import score_text
 from .monitor import run_once
 from .notify import TelegramNotifier, save_chat_id
@@ -28,6 +36,13 @@ def _schedule_interval(arg: str) -> int:
         raise argparse.ArgumentTypeError("--every must be an integer") from e
     try:
         return scheduler.validate_interval(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from e
+
+
+def _document_refs(ids: list[str], default_module: str):
+    try:
+        return parse_document_refs(ids, default_module=default_module)
     except ValueError as e:
         raise argparse.ArgumentTypeError(str(e)) from e
 
@@ -73,15 +88,37 @@ def cmd_setup_telegram(args) -> int:
 def cmd_list(args) -> int:
     client = VnuClient().login()
     for module in args.modules:
-        total, docs = client.list_documents(
-            module, limit=args.limit, unread_only=args.unread)
+        total, docs = fetch_documents(module=module, client=client,
+                                      limit=args.limit, pages=args.pages)
         print(f"\n== {config.MODULES[module]['label']} (total {total}) ==")
         for d in docs:
             sc = score_text(d.subject, d.party)
-            flag = "•" if d.unread else " "
             att = "📎" if d.has_attach else "  "
-            print(f" {flag}{att} {sc.emoji}{sc.value:>2} [{d.intid}] {d.date_short} "
+            print(f" {att} {sc.emoji}{sc.value:>2} [{d.intid}] {d.date_short} "
                   f"{d.number:>5} {d.symbol[:16]:16} | {d.subject[:60]}")
+    return 0
+
+
+def cmd_search(args) -> int:
+    client = VnuClient().login()
+    query = " ".join(args.keywords)
+    docs = search_documents(
+        client,
+        query,
+        modules=args.modules,
+        limit=args.limit,
+        pages=args.pages,
+        unread_only=False,
+        has_attach=args.has_attach,
+    )
+    if not docs:
+        print("No matching documents.")
+        return 0
+    for d in docs:
+        sc = score_text(d.subject, d.party)
+        att = "📎" if d.has_attach else "  "
+        print(f"{d.module}:{d.intid} {att} {sc.emoji}{sc.value:>2} "
+              f"{d.date_short} {d.number:>5} {d.symbol[:16]:16} | {d.subject[:80]}")
     return 0
 
 
@@ -97,22 +134,45 @@ def cmd_score(args) -> int:
 
 def cmd_download(args) -> int:
     client = VnuClient().login()
-    _, docs = client.list_documents(args.module, limit=200)
-    doc = next((d for d in docs if d.intid == str(args.id)), None)
-    if doc is None:
-        print(f"Document {args.id} not in the latest {args.module} list; "
-              "try a larger window or check the id.")
-        return 1
-    paths = client.download_all(doc)
-    print(f"Downloaded {len(paths)} file(s):")
-    for p in paths:
-        print("  ", p)
+    refs = _document_refs(args.ids, args.module)
+    items = download_documents(
+        client,
+        refs,
+        dest_dir=Path(args.dest_dir) if args.dest_dir else None,
+        lookup_limit=args.lookup_limit,
+    )
+    total = sum(len(item.files) for item in items)
+    print(f"Downloaded {total} file(s) from {len(items)} document(s):")
+    for item in items:
+        print(f"  {item.doc.module}:{item.doc.intid} {item.doc.symbol} | {item.doc.subject[:80]}")
+        for path in item.files:
+            print("    ", path)
+    return 0
+
+
+def cmd_send(args) -> int:
+    client = VnuClient().login()
+    notifier = TelegramNotifier.from_config()
+    refs = _document_refs(args.ids, args.module)
+    items = send_documents(
+        client,
+        notifier,
+        refs,
+        delete_after=args.delete_after,
+        dest_dir=Path(args.dest_dir) if args.dest_dir else None,
+        lookup_limit=args.lookup_limit,
+    )
+    total = sum(len(item.files) for item in items)
+    print(f"Sent {len(items)} document(s), {total} attachment file(s).")
+    if args.delete_after:
+        print("Deleted local downloaded files after sending.")
     return 0
 
 
 def cmd_monitor(args) -> int:
     result = run_once(
         modules=args.modules, limit=args.limit, min_level=args.min_level,
+        pages=args.pages,
         download=args.download, delete_after=args.delete_after,
         send_files=args.send_files, notify=not args.no_notify, dry_run=args.dry_run,
     )
@@ -128,6 +188,7 @@ def cmd_monitor(args) -> int:
 
 def cmd_schedule(args) -> int:
     margs = (f"monitor --once --modules {','.join(args.modules)} --min-level {args.min_level}"
+             + f" --pages {args.pages}"
              + (" --download" if args.download else "")
              + (" --delete-after" if args.delete_after else "")
              + " --quiet")
@@ -157,23 +218,50 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("list", help="List recent documents with importance scores")
     sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
-    sp.add_argument("--limit", type=int, default=20)
-    sp.add_argument("--unread", action="store_true", help="Only unread documents")
+    sp.add_argument("--limit", type=int, default=20, help="Documents per page")
+    sp.add_argument("--pages", type=int, default=config.DEFAULT_FETCH_PAGES,
+                    help=f"Pages to fetch per module (default {config.DEFAULT_FETCH_PAGES})")
     sp.set_defaults(func=cmd_list)
+
+    sp = sub.add_parser("search", help="Search documents by subject keywords")
+    sp.add_argument("keywords", nargs="+")
+    sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
+    sp.add_argument("--limit", type=int, default=20, help="Documents per page")
+    sp.add_argument("--pages", type=int, default=config.DEFAULT_FETCH_PAGES,
+                    help=f"Pages to fetch per module (default {config.DEFAULT_FETCH_PAGES})")
+    sp.add_argument("--has-attach", action="store_true", help="Only documents with attachments")
+    sp.set_defaults(func=cmd_search)
 
     sp = sub.add_parser("score", help="Test the importance scorer on a phrase")
     sp.add_argument("text")
     sp.set_defaults(func=cmd_score)
 
-    sp = sub.add_parser("download", help="Download a document's attachments")
+    sp = sub.add_parser("download", help="Download document attachment(s)")
     sp.add_argument("--module", choices=list(config.MODULES), default="den")
-    sp.add_argument("--id", required=True, help="Document intid")
+    sp.add_argument("--id", dest="ids", required=True, action="append",
+                    help="Document intid; repeatable. Accepts module:id.")
+    sp.add_argument("--dest-dir", help="Download root directory")
+    sp.add_argument("--lookup-limit", type=int, default=200,
+                    help="Fallback recent-document lookup window")
     sp.set_defaults(func=cmd_download)
+
+    sp = sub.add_parser("send", help="Download and send document attachment(s) via Telegram")
+    sp.add_argument("--module", choices=list(config.MODULES), default="den")
+    sp.add_argument("--id", dest="ids", required=True, action="append",
+                    help="Document intid; repeatable. Accepts module:id.")
+    sp.add_argument("--dest-dir", help="Download root directory")
+    sp.add_argument("--lookup-limit", type=int, default=200,
+                    help="Fallback recent-document lookup window")
+    sp.add_argument("--delete-after", action="store_true",
+                    help="Delete local downloaded files after sending")
+    sp.set_defaults(func=cmd_send)
 
     sp = sub.add_parser("monitor", help="Run one polling pass (fetch/score/alert)")
     sp.add_argument("--once", action="store_true", help="(default) single pass")
     sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
-    sp.add_argument("--limit", type=int, default=60)
+    sp.add_argument("--limit", type=int, default=60, help="Documents per page")
+    sp.add_argument("--pages", type=int, default=config.DEFAULT_FETCH_PAGES,
+                    help=f"Pages to fetch per module (default {config.DEFAULT_FETCH_PAGES})")
     sp.add_argument("--min-level", choices=["LOW", "MEDIUM", "HIGH"], default="MEDIUM")
     sp.add_argument("--download", action="store_true", help="Download attachments of alerted docs")
     sp.add_argument("--delete-after", action="store_true",
@@ -188,6 +276,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("schedule", help="Install a recurring scheduled monitor (cron / Task Scheduler)")
     sp.add_argument("--every", type=_schedule_interval, default=15, help="Minutes between runs (default 15)")
     sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
+    sp.add_argument("--pages", type=int, default=config.DEFAULT_FETCH_PAGES,
+                    help=f"Pages to fetch per module (default {config.DEFAULT_FETCH_PAGES})")
     sp.add_argument("--min-level", choices=["LOW", "MEDIUM", "HIGH"], default="MEDIUM")
     sp.add_argument("--download", action="store_true")
     sp.add_argument("--delete-after", action="store_true")

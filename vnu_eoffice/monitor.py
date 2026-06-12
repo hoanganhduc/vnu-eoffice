@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import config
 from .client import VnuClient
+from .documents import fetch_documents
 from .importance import Score, score_document
 from .models import Document
 from .notify import TelegramNotifier, esc
@@ -108,6 +109,7 @@ def format_alert(doc: Document, score: Score, files: list[Path]) -> str:
 def run_once(
     modules: tuple[str, ...] = config.DEFAULT_MODULES,
     limit: int = 60,
+    pages: int = config.DEFAULT_FETCH_PAGES,
     min_level: str = "MEDIUM",
     download: bool = False,
     delete_after: bool = False,
@@ -135,7 +137,7 @@ def run_once(
 
     for module in modules:
         try:
-            docs = client.recent(module, limit=limit)
+            _, docs = fetch_documents(client, module, limit=limit, pages=pages)
         except Exception as e:
             result.errors.append(f"[{module}] list failed: {e}")
             continue

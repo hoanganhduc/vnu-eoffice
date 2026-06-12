@@ -8,7 +8,7 @@ polls both document modules — **Văn bản đến** (incoming) and **Văn bả
 (outgoing) — scores each new document for importance using a transparent,
 keyword-based rule set that runs **entirely on your machine**, and sends a
 Telegram alert for the ones that matter. It can optionally download a document's
-attachments and delete them again after the alert is sent.
+attachments and delete them again after the alert attempt.
 
 > No document text or metadata is ever sent to any third-party AI service.
 > The only outbound traffic is (1) to `eoffice.vnu.edu.vn` to read your own
@@ -25,7 +25,7 @@ attachments and delete them again after the alert is sent.
   (`giấy mời`), document type, and important senders. Fully auditable and tunable.
 - 🔔 Telegram alerts with subject, sender, deadline, score reasons, and a link.
 - 📎 Optional attachment download, with an **opt-in `--delete-after`** to wipe
-  local copies once the document has been checked and the alert sent.
+  local copies once the document has been checked and the alert attempt finishes.
 - ⏰ Cross-platform scheduling: **cron** (Linux/macOS) or **Task Scheduler** (Windows).
 - 🧰 Dedup by document id, baseline-on-first-run (no backlog spam).
 
@@ -35,16 +35,15 @@ attachments and delete them again after the alert is sent.
 git clone https://github.com/hoanganhduc/vnu-eoffice.git
 cd vnu-eoffice
 pip install -e .
-# optional Vietnamese OCR for scanned PDFs:  pip install -e ".[ocr]"
 ```
 
 Requires Python ≥ 3.10. Dependencies: `requests`, `beautifulsoup4`.
 
 ## Configure credentials
 
-Secrets are **never** stored in the repo. They are read from
-`~/.config/vnu-eoffice/secrets.json` (override with `VNU_SECRETS_FILE`) or from environment
-variables. Required keys:
+Secrets are **never** stored in the repo. They are read from environment
+variables, from `~/.config/vnu-eoffice/secrets.json`, or from a JSON file
+specified with `VNU_SECRETS_FILE`. Required keys:
 
 ```json
 {
@@ -98,10 +97,11 @@ vnu-eoffice schedule --every 15
 --limit 60             How many recent docs to scan per module
 --min-level MEDIUM     Alert threshold: LOW | MEDIUM | HIGH
 --download             Download attachments of alerted documents
---delete-after         Delete those downloaded files after the alert is sent
+--delete-after         Delete downloaded files after the alert attempt
 --send-files           Also push the files to Telegram (sends content off-machine)
 --no-notify            Don't send Telegram messages (print only)
 --dry-run              No downloads, sends, or state writes
+--quiet                Suppress alert subject lines in output
 ```
 
 ### `schedule` options
@@ -115,6 +115,8 @@ vnu-eoffice schedule --every 15
 --preview              Print the cron / schtasks line without installing
 --remove               Remove the installed schedule
 ```
+
+Scheduled jobs use quiet monitor output by default.
 
 ## How importance scoring works
 
@@ -139,15 +141,17 @@ in the alert ("Lý do"), so you can see *why* a document was flagged.
 
 ## Privacy & the `--delete-after` option
 
-- Default `monitor` (without `--download`) stores **nothing** on disk; alerts are
-  metadata-only.
+- Default `monitor` (without `--download`) writes only local state/log data; alerts
+  are metadata-only.
 - With `--download`, attachments are saved under
   `~/.local/share/vnu_eoffice/documents/<module>/<number>_<id>/`.
-- Add `--delete-after` to remove those files (and the now-empty folder) right
-  after the alert is sent — "check, notify, then forget".
+- Add `--delete-after` to remove those files (and the now-empty folder) after
+  the alert attempt — "check, notify, then forget".
 - `--send-files` is the only way document *content* leaves your machine, and it
   is off by default. The metadata alert text still goes to Telegram (your choice
   of channel).
+- Scheduled monitor output suppresses alert subject lines by default, reducing
+  sensitive metadata retained in local cron logs.
 
 ## Documentation
 
@@ -163,6 +167,8 @@ in the alert ("Lý do"), so you can see *why* a document was flagged.
   institution's acceptable-use rules.
 - It scrapes an undocumented ExtJS backend, so a site redesign or a switch to
   SSO-only login could require updates.
+- It does not OCR scanned attachments. Importance scoring uses document
+  metadata, especially the subject and sender/recipient.
 - VNU documents may be marked internal/confidential. Keep downloads on a machine
   you control and prefer `--delete-after`; think before using `--send-files`.
 
