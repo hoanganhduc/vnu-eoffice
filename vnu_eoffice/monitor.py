@@ -7,7 +7,6 @@ runs alert only on genuinely new documents that meet the importance threshold.
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,7 +29,24 @@ def load_seen() -> dict:
 
 def save_seen(state: dict) -> None:
     config.ensure_dirs()
-    config.SEEN_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=0))
+    config.write_private_text(config.SEEN_FILE,
+                              json.dumps(state, ensure_ascii=False, indent=0))
+
+
+def initialized_modules(state: dict) -> set[str]:
+    mods = set(state.get("_initialized_modules", []))
+    # Backward compatibility for state written by versions that used one global
+    # flag. Only modules with remembered ids count as initialized.
+    if state.get("_initialized"):
+        mods.update(m for m in config.MODULES if state.get(m))
+    return mods
+
+
+def remember_module_initialized(state: dict, module: str) -> None:
+    mods = initialized_modules(state)
+    mods.add(module)
+    state["_initialized_modules"] = sorted(mods)
+    state["_initialized"] = bool(mods)
 
 
 # -- result reporting --------------------------------------------------------
@@ -45,15 +61,24 @@ class Alert:
 @dataclass
 class RunResult:
     first_run: bool = False
+    baseline_modules: list[str] = field(default_factory=list)
+    baseline_count: int = 0
     new_count: int = 0
     alerts: list[Alert] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
-        if self.first_run:
-            return f"Baseline recorded ({self.new_count} documents in view). No alerts on first run."
-        return (f"{self.new_count} new document(s); "
-                f"{len(self.alerts)} alert(s); {len(self.errors)} error(s).")
+        if self.first_run and self.baseline_modules:
+            return (f"Baseline recorded ({self.baseline_count} documents in view; "
+                    f"modules: {', '.join(self.baseline_modules)}). No alerts on first run.")
+        parts = [
+            f"{self.new_count} new document(s)",
+            f"{len(self.alerts)} alert(s)",
+            f"{len(self.errors)} error(s)",
+        ]
+        if self.baseline_modules:
+            parts.append(f"baselined modules: {', '.join(self.baseline_modules)}")
+        return "; ".join(parts) + "."
 
 
 # -- alert formatting --------------------------------------------------------
@@ -92,10 +117,13 @@ def run_once(
     client: VnuClient | None = None,
     notifier: TelegramNotifier | None = None,
 ) -> RunResult:
+    if not modules:
+        raise ValueError("At least one module must be selected.")
     config.ensure_dirs()
     client = client or VnuClient().login()
     seen = load_seen()
-    first_run = not seen.get("_initialized")
+    initialized = initialized_modules(seen)
+    first_run = not initialized
     result = RunResult(first_run=first_run)
 
     if notify and notifier is None:
@@ -115,7 +143,15 @@ def run_once(
         new_docs = [d for d in docs if d.intid not in seen_ids]
         result.new_count += len(new_docs)
 
-        if not first_run:
+        if module not in initialized:
+            result.baseline_modules.append(module)
+            result.baseline_count += len(docs)
+            seen[module] = _merge_seen([d.intid for d in docs], seen.get(module, []))
+            remember_module_initialized(seen, module)
+            continue
+
+        failed_ids: set[str] = set()
+        if module in initialized:
             for doc in new_docs:
                 score = score_document(doc)
                 if not score.meets(min_level):
@@ -123,19 +159,16 @@ def run_once(
                 try:
                     result.alerts.append(
                         _handle_alert(client, notifier, doc, score,
-                                      download, delete_after, send_files, dry_run))
+                                      download, delete_after, send_files, dry_run,
+                                      require_delivery=notify))
                 except Exception as e:
+                    failed_ids.add(doc.intid)
                     result.errors.append(f"[{module}] alert {doc.intid} failed: {e}")
 
         # Update remembered ids (page is newest-first; keep newest SEEN_CAP).
-        merged, ordered = set(), []
-        for cid in [d.intid for d in docs] + seen.get(module, []):
-            if cid not in merged:
-                merged.add(cid)
-                ordered.append(cid)
-        seen[module] = ordered[:SEEN_CAP]
+        ids_to_remember = [d.intid for d in docs if d.intid not in failed_ids]
+        seen[module] = _merge_seen(ids_to_remember, seen.get(module, []))
 
-    seen["_initialized"] = True
     if not dry_run:
         save_seen(seen)
 
@@ -152,24 +185,30 @@ def run_once(
 
 
 def _handle_alert(client, notifier, doc, score, download, delete_after,
-                  send_files, dry_run) -> Alert:
+                  send_files, dry_run, require_delivery=True) -> Alert:
     files: list[Path] = []
-    if download and doc.has_attach and not dry_run:
-        files = client.download_all(doc)
-
-    if notifier and not dry_run:
-        notifier.send_message(format_alert(doc, score, files))
-        if send_files:
-            for f in files:
-                notifier.send_document(f, caption=f"{doc.symbol} — {doc.subject[:120]}")
-
     alert = Alert(doc=doc, score=score, files=files)
-    # "Delete after checking and sending": wipe the local copy once alerted.
-    if delete_after and files and not dry_run:
-        _delete_files(files)
-        alert.deleted = True
-        alert.files = []
-    return alert
+    try:
+        if download and doc.has_attach and not dry_run:
+            files = client.download_all(doc)
+            alert.files = files
+
+        if require_delivery and notifier is None and not dry_run:
+            raise RuntimeError("Telegram notifier is unavailable.")
+
+        if notifier and not dry_run:
+            notifier.send_message(format_alert(doc, score, files))
+            if send_files:
+                for f in files:
+                    notifier.send_document(f, caption=f"{doc.symbol} — {doc.subject[:120]}")
+        return alert
+    finally:
+        # If the user asked us not to retain downloaded copies, honor that even
+        # when delivery fails. The next retry can download again if needed.
+        if delete_after and files and not dry_run:
+            _delete_files(files)
+            alert.deleted = True
+            alert.files = []
 
 
 def _delete_files(files: list[Path]) -> None:
@@ -186,3 +225,12 @@ def _delete_files(files: list[Path]) -> None:
                 d.rmdir()
         except OSError:
             pass
+
+
+def _merge_seen(newest_ids: list[str], old_ids: list[str]) -> list[str]:
+    merged, ordered = set(), []
+    for cid in newest_ids + old_ids:
+        if cid not in merged:
+            merged.add(cid)
+            ordered.append(cid)
+    return ordered[:SEEN_CAP]

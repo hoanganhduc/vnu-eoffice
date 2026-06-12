@@ -1,0 +1,117 @@
+name: VNU e-office monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */4 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vnu-eoffice-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    env:
+      VNU_EOFFICE_USERNAME: ${{ secrets.VNU_EOFFICE_USERNAME }}
+      VNU_EOFFICE_PASSWORD: ${{ secrets.VNU_EOFFICE_PASSWORD }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      VNU_DATA_DIR: ${{ github.workspace }}/.github/vnu-eoffice-runtime
+      VNU_DOCS_DIR: ${{ runner.temp }}/vnu-eoffice-documents
+      VNU_MONITOR_CRON: "17 */4 * * *"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check required secrets
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in VNU_EOFFICE_USERNAME VNU_EOFFICE_PASSWORD TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+            if [ -z "${!key:-}" ]; then
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              echo "Monitor skipped because one or more required secrets are missing."
+              exit 0
+            fi
+          done
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        if: steps.preflight.outputs.ready == 'true'
+        run: python -m pip install -e .
+
+      - name: Fetch latest documents and notify Telegram
+        if: steps.preflight.outputs.ready == 'true'
+        id: monitor
+        continue-on-error: true
+        run: |
+          python -m vnu_eoffice monitor \
+            --once \
+            --modules den,di \
+            --limit 60 \
+            --min-level MEDIUM \
+            --quiet
+
+      - name: Update monitor status
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/vnu-eoffice-runtime
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          ready = os.environ.get("READY") == "true"
+          outcome = os.environ.get("MONITOR_OUTCOME") if ready else "skipped_missing_required_secrets"
+          status = {
+              "last_run_utc": datetime.now(timezone.utc).isoformat(),
+              "event": os.environ.get("GITHUB_EVENT_NAME"),
+              "run_id": os.environ.get("GITHUB_RUN_ID"),
+              "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+              "schedule": os.environ.get("VNU_MONITOR_CRON"),
+              "monitor_outcome": outcome,
+          }
+          Path(".github/vnu-eoffice-runtime/status.json").write_text(
+              json.dumps(status, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+        env:
+          READY: ${{ steps.preflight.outputs.ready }}
+          MONITOR_OUTCOME: ${{ steps.monitor.outcome }}
+
+      - name: Commit monitor state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/vnu-eoffice-runtime/status.json
+          if [ -f .github/vnu-eoffice-runtime/state/seen.json ]; then
+            git add .github/vnu-eoffice-runtime/state/seen.json
+          fi
+          if git diff --cached --quiet; then
+            echo "No monitor state changes to commit."
+          else
+            git commit -m "chore: update vnu eoffice monitor state [skip ci]"
+            git push
+          fi
+
+      - name: Fail if monitor failed
+        if: steps.preflight.outputs.ready == 'true' && steps.monitor.outcome != 'success'
+        run: exit 1

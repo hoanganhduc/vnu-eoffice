@@ -13,10 +13,23 @@ from .notify import TelegramNotifier, save_chat_id
 
 def _modules(arg: str) -> tuple[str, ...]:
     mods = tuple(m.strip() for m in arg.split(",") if m.strip())
+    if not mods:
+        raise argparse.ArgumentTypeError("at least one module is required")
     bad = [m for m in mods if m not in config.MODULES]
     if bad:
         raise argparse.ArgumentTypeError(f"unknown module(s): {bad}; choose from {list(config.MODULES)}")
     return mods
+
+
+def _schedule_interval(arg: str) -> int:
+    try:
+        value = int(arg)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("--every must be an integer") from e
+    try:
+        return scheduler.validate_interval(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from e
 
 
 # -- commands ----------------------------------------------------------------
@@ -104,20 +117,22 @@ def cmd_monitor(args) -> int:
         send_files=args.send_files, notify=not args.no_notify, dry_run=args.dry_run,
     )
     print(result.summary())
-    for a in result.alerts:
-        print(f"  {a.score.emoji} [{a.doc.module}] {a.doc.symbol} — {a.doc.subject[:70]}"
-              + ("  (files deleted)" if a.deleted else ""))
+    if not args.quiet:
+        for a in result.alerts:
+            print(f"  {a.score.emoji} [{a.doc.module}] {a.doc.symbol} — {a.doc.subject[:70]}"
+                  + ("  (files deleted)" if a.deleted else ""))
     for e in result.errors:
         print("  ! ", e)
-    return 0
+    return 1 if result.errors else 0
 
 
 def cmd_schedule(args) -> int:
     margs = (f"monitor --once --modules {','.join(args.modules)} --min-level {args.min_level}"
              + (" --download" if args.download else "")
-             + (" --delete-after" if args.delete_after else ""))
+             + (" --delete-after" if args.delete_after else "")
+             + " --quiet")
     if args.remove:
-        print("Removed." if scheduler.remove_cron() else "No existing entry.")
+        print("Removed." if scheduler.remove() else "No existing entry.")
         return 0
     if args.preview:
         print(scheduler.preview(args.every, margs))
@@ -167,10 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Also send the document files via Telegram (sends content off-machine)")
     sp.add_argument("--no-notify", action="store_true", help="Do not send Telegram messages")
     sp.add_argument("--dry-run", action="store_true", help="No downloads, sends, or state writes")
+    sp.add_argument("--quiet", action="store_true", help="Suppress alert subject lines in output")
     sp.set_defaults(func=cmd_monitor)
 
     sp = sub.add_parser("schedule", help="Install a recurring scheduled monitor (cron / Task Scheduler)")
-    sp.add_argument("--every", type=int, default=15, help="Minutes between runs (default 15)")
+    sp.add_argument("--every", type=_schedule_interval, default=15, help="Minutes between runs (default 15)")
     sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
     sp.add_argument("--min-level", choices=["LOW", "MEDIUM", "HIGH"], default="MEDIUM")
     sp.add_argument("--download", action="store_true")

@@ -17,8 +17,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Optional Vietnamese OCR for scanned-PDF text extraction.
-ocr = ["pymupdf>=1.23", "pytesseract>=0.3"]
 dev = ["pytest>=7"]
 
 [project.scripts]

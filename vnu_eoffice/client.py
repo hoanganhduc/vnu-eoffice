@@ -7,6 +7,7 @@ machine and eoffice.vnu.edu.vn; no third party is involved.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -15,6 +16,27 @@ from bs4 import BeautifulSoup
 
 from . import config
 from .models import Document
+
+
+class VnuClientError(RuntimeError):
+    pass
+
+
+class VnuLoginError(VnuClientError):
+    pass
+
+
+class VnuApiError(VnuClientError):
+    pass
+
+
+def _looks_like_html(text: str) -> bool:
+    head = text[:1000].lower()
+    return (
+        "<html" in head or "<!doctype" in head
+        or "signincontrol$password" in head
+        or ("<form" in head and "login" in head)
+    )
 
 
 def _loads_lenient(text: str):
@@ -26,22 +48,25 @@ def _loads_lenient(text: str):
     regex and parse the ``[...]`` array directly instead of mangling string values.
     """
     text = text.lstrip("﻿").strip()
+    if not text:
+        return []
+    if _looks_like_html(text):
+        raise VnuApiError("Endpoint returned HTML instead of JSON; the session may have expired.")
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"total\s*:\s*(\d+)", text)
         total = int(m.group(1)) if m else None
         a, b = text.find("["), text.rfind("]")
-        results = json.loads(text[a:b + 1]) if a != -1 and b > a else []
+        if a == -1 or b <= a:
+            raise VnuApiError("Endpoint response was neither JSON nor a SELAB results envelope.")
+        results = json.loads(text[a:b + 1])
         return {"total": total, "results": results}
-
-
-class VnuLoginError(RuntimeError):
-    pass
 
 
 class VnuClient:
     def __init__(self, base_url: str = config.BASE_URL):
+        config.validate_base_url(base_url)
         self.base = base_url.rstrip("/") + "/"
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": config.USER_AGENT})
@@ -100,6 +125,8 @@ class VnuClient:
                         search: str = "", unread_only: bool = False,
                         has_attach: bool = False, **extra) -> tuple[int, list[Document]]:
         """Return (total_count, [Document]) for one page of a module's list."""
+        if not self._logged_in:
+            raise VnuLoginError("Client is not logged in. Call login() before listing documents.")
         params = {
             "page": page, "start": (page - 1) * limit, "limit": limit,
             "trichyeu": search, "kieuvb": -1, "loaivanban": 0, "sovanban": 0,
@@ -112,7 +139,9 @@ class VnuClient:
                              timeout=config.REQUEST_TIMEOUT)
         r.raise_for_status()
         data = _loads_lenient(r.text)
-        docs = [Document.from_record(module, rec) for rec in data.get("results", [])]
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            raise VnuApiError("Document list response did not contain a results list.")
+        docs = [Document.from_record(module, rec) for rec in data["results"]]
         return data.get("total") or len(docs), docs
 
     def recent(self, module: str, limit: int = 60, **kw) -> list[Document]:
@@ -122,16 +151,24 @@ class VnuClient:
 
     def attachments(self, module: str, intid: str) -> list[dict]:
         """List a document's attachment files: [{name, size, date, itemId}, ...]."""
+        if not self._logged_in:
+            raise VnuLoginError("Client is not logged in. Call login() before listing attachments.")
         r = self.session.post(self._url(module, "attach.list.php"),
                              data={"id": intid}, timeout=config.REQUEST_TIMEOUT)
         r.raise_for_status()
-        try:
-            return _loads_lenient(r.text) or []
-        except (json.JSONDecodeError, ValueError):
+        data = _loads_lenient(r.text)
+        if isinstance(data, dict):
+            data = data.get("results", [])
+        if data in (None, ""):
             return []
+        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+            raise VnuApiError("Attachment response did not contain a list of files.")
+        return data
 
     def detail_text(self, module: str, intid: str) -> str:
         """Fetch the document detail (viewvb.php) and return its visible text."""
+        if not self._logged_in:
+            raise VnuLoginError("Client is not logged in. Call login() before reading details.")
         r = self.session.post(self._url(module, "viewvb.php"),
                              data={"id": intid}, timeout=config.REQUEST_TIMEOUT)
         if r.status_code != 200:
@@ -141,21 +178,29 @@ class VnuClient:
     def download_file(self, module: str, item_id: str, dest: Path) -> Path:
         """Download a single attachment by its file itemId to dest."""
         dest = Path(dest)
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        config.ensure_private_dir(dest.parent)
         with self.session.get(self._url(module, f"download.php?intid={item_id}"),
                               stream=True, timeout=config.REQUEST_TIMEOUT) as r:
             r.raise_for_status()
-            with open(dest, "wb") as fh:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(dest, flags, 0o600)
+            with os.fdopen(fd, "wb") as fh:
                 for chunk in r.iter_content(chunk_size=65536):
                     if chunk:
                         fh.write(chunk)
+            try:
+                dest.chmod(0o600)
+            except OSError:
+                pass
         return dest
 
     def download_all(self, doc: Document, dest_dir: Path | None = None) -> list[Path]:
         """Download every attachment of a Document; returns the saved file paths."""
         config.ensure_dirs()
+        safe_number = _safe_name(doc.number or "0")
+        safe_intid = _safe_name(doc.intid)
         dest_dir = Path(dest_dir) if dest_dir else (
-            config.DOCS_DIR / doc.module / f"{doc.number or '0'}_{doc.intid}")
+            config.DOCS_DIR / doc.module / f"{safe_number}_{safe_intid}")
         saved: list[Path] = []
         for i, f in enumerate(self.attachments(doc.module, doc.intid)):
             name = _safe_name(f.get("name") or f"attachment_{i}")

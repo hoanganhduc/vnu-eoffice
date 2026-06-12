@@ -1,22 +1,32 @@
-"""Configuration, paths, and credential loading for vnu_eoffice.
-
-Nothing secret is hard-coded. Credentials and the Telegram bot token are read
-from a JSON secrets file (default ~/.config/vnu-eoffice/secrets.json) or environment
-variables, so they never live in the codebase or the repository.
-"""
+"""Configuration, paths, and runtime credential loading for vnu_eoffice."""
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 # --- Site -------------------------------------------------------------------
-BASE_URL = os.environ.get("VNU_BASE_URL", "https://eoffice.vnu.edu.vn/qlvb/")
+DEFAULT_BASE_URL = "https://eoffice.vnu.edu.vn/qlvb/"
+BASE_URL = os.environ.get("VNU_BASE_URL", DEFAULT_BASE_URL)
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120 Safari/537.36"
 )
 REQUEST_TIMEOUT = int(os.environ.get("VNU_TIMEOUT", "30"))
+
+
+def validate_base_url(base_url: str) -> None:
+    """Refuse accidental credential posts to a non-VNU host."""
+    if os.environ.get("VNU_ALLOW_NON_VNU_BASE_URL") == "1":
+        return
+    parsed = urlparse(base_url)
+    expected = urlparse(DEFAULT_BASE_URL)
+    if parsed.scheme != "https" or parsed.hostname != expected.hostname:
+        raise RuntimeError(
+            "Refusing to send VNU credentials to a non-default base URL. "
+            "Set VNU_ALLOW_NON_VNU_BASE_URL=1 only for trusted test systems."
+        )
 
 # --- Module definitions -----------------------------------------------------
 # Each e-office module is a separate ExtJS sub-app under the same login session.
@@ -58,12 +68,50 @@ TELEGRAM_STATE_FILE = STATE_DIR / "telegram.json"
 
 def ensure_dirs() -> None:
     for d in (DATA_DIR, STATE_DIR, DOCS_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(d)
+
+
+def ensure_private_dir(path: Path) -> None:
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
+
+
+def _no_follow_flags(flags: int) -> int:
+    return flags | getattr(os, "O_NOFOLLOW", 0)
+
+
+def write_private_text(path: Path, text: str) -> None:
+    path = Path(path)
+    ensure_private_dir(path.parent)
+    flags = _no_follow_flags(os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def ensure_private_file(path: Path) -> None:
+    path = Path(path)
+    ensure_private_dir(path.parent)
+    flags = _no_follow_flags(os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+    fd = os.open(path, flags, 0o600)
+    os.close(fd)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
 
 
 # --- Secrets ----------------------------------------------------------------
-SECRETS_FILE = Path(os.environ.get(
-    "VNU_SECRETS_FILE", str(Path.home() / "." / "secrets.json")))
+DEFAULT_SECRETS_FILE = Path.home() / ".config" / "vnu-eoffice" / "secrets.json"
+SECRETS_FILE = Path(os.environ["VNU_SECRETS_FILE"]) if os.environ.get("VNU_SECRETS_FILE") else DEFAULT_SECRETS_FILE
 
 
 def load_secrets() -> dict:
@@ -79,9 +127,7 @@ def get_credentials() -> tuple[str, str]:
     user = os.environ.get("VNU_EOFFICE_USERNAME") or secrets.get("VNU_EOFFICE_USERNAME")
     pw = os.environ.get("VNU_EOFFICE_PASSWORD") or secrets.get("VNU_EOFFICE_PASSWORD")
     if not user or not pw:
-        raise RuntimeError(
-            "Missing VNU credentials. Set VNU_EOFFICE_USERNAME / VNU_EOFFICE_PASSWORD "
-            f"in {SECRETS_FILE} or the environment.")
+        raise RuntimeError("Missing VNU credentials.")
     return user, pw
 
 

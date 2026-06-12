@@ -13,6 +13,10 @@ from . import config
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
+class TelegramError(RuntimeError):
+    pass
+
+
 class TelegramNotifier:
     def __init__(self, token: str, chat_id: str | int | None = None):
         self.token = token
@@ -23,13 +27,23 @@ class TelegramNotifier:
     def from_config(cls) -> "TelegramNotifier":
         token = config.get_telegram_token()
         if not token:
-            raise RuntimeError("No TELEGRAM_BOT_TOKEN in secrets/env.")
+            raise RuntimeError("Telegram bot token is not configured.")
         return cls(token, chat_id=load_chat_id())
 
     def _call(self, method: str, **kwargs) -> dict:
         r = requests.post(API.format(token=self.token, method=method),
                           timeout=config.REQUEST_TIMEOUT, **kwargs)
-        return r.json()
+        try:
+            r.raise_for_status()
+            data = r.json()
+        except requests.RequestException as e:
+            raise TelegramError(f"Telegram {method} request failed: {e}") from e
+        except ValueError as e:
+            raise TelegramError(f"Telegram {method} returned non-JSON response.") from e
+        if not data.get("ok"):
+            desc = data.get("description") or data
+            raise TelegramError(f"Telegram {method} failed: {desc}")
+        return data
 
     # -- chat-id discovery ---------------------------------------------------
     def get_me(self) -> dict:
@@ -56,7 +70,7 @@ class TelegramNotifier:
     def send_message(self, text: str, parse_mode: str = "HTML",
                      disable_preview: bool = True) -> dict:
         if not self.chat_id:
-            raise RuntimeError("No chat_id set. Run `vnu-eoffice setup-telegram` first.")
+            raise RuntimeError("Telegram chat id is not configured.")
         return self._call("sendMessage", data={
             "chat_id": self.chat_id, "text": text, "parse_mode": parse_mode,
             "disable_web_page_preview": disable_preview,
@@ -64,7 +78,7 @@ class TelegramNotifier:
 
     def send_document(self, path: Path, caption: str = "") -> dict:
         if not self.chat_id:
-            raise RuntimeError("No chat_id set. Run `vnu-eoffice setup-telegram` first.")
+            raise RuntimeError("Telegram chat id is not configured.")
         path = Path(path)
         with open(path, "rb") as fh:
             return self._call("sendDocument",
@@ -85,7 +99,8 @@ def load_chat_id() -> str | None:
 
 def save_chat_id(chat_id: str | int) -> None:
     config.ensure_dirs()
-    config.TELEGRAM_STATE_FILE.write_text(json.dumps({"chat_id": str(chat_id)}))
+    config.write_private_text(config.TELEGRAM_STATE_FILE,
+                              json.dumps({"chat_id": str(chat_id)}))
 
 
 def esc(value) -> str:
