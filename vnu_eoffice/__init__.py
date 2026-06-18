@@ -13,6 +13,7 @@ from .documents import (
     search_documents,
     send_documents,
 )
+from .items import load_mapping, resolve_document_refs, save_mapping
 from .notify import TelegramNotifier
 
 __version__ = "0.1.0"
@@ -25,5 +26,8 @@ __all__ = [
     "fetch_documents",
     "search_documents",
     "send_documents",
+    "load_mapping",
+    "resolve_document_refs",
+    "save_mapping",
     "TelegramNotifier",
 ]

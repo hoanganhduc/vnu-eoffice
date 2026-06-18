@@ -25,6 +25,8 @@ them again after the alert attempt.
   local copies once the document has been checked and the alert attempt finishes.
 - ⏰ Cross-platform scheduling: **cron** (Linux/macOS) or **Task Scheduler** (Windows).
 - 🧰 Dedup by document id, baseline-on-first-run (no backlog spam).
+- 🔢 Numbered latest/search/monitor results, with saved item numbers for
+  follow-up `download --item` and `send --item` requests.
 
 ## Install
 
@@ -81,10 +83,18 @@ vnu-eoffice schedule --every 15
 |---|---|
 | `test-login` | Verify credentials; print document counts for both modules. |
 | `setup-telegram [--chat-id N]` | Discover & save the Telegram chat id (message the bot first). |
-| `list [--modules den,di] [--limit N]` | List recent documents. |
-| `download --module den --id <intid>` | Download one document's attachments. |
+| `list [--modules den,di] [--limit N]` | List recent documents and save numbered items. |
+| `search <keywords> [--modules den,di]` | Search documents and save numbered items. |
+| `items [--source latest\|search\|monitor]` | Show the saved item numbers again. |
+| `download --id den:<intid>` | Download one document's attachments by direct id. |
+| `download --item 2,4` | Download attachments by saved item number. |
+| `send --item 2 --delete-after` | Send a saved item through Telegram. |
 | `monitor [options]` | One polling pass: fetch → alert → (download) → (delete). |
 | `schedule [options]` | Install/preview/remove the recurring scheduled job. |
+
+`list`, `search`, and alerting `monitor` runs number retrieved documents as
+`1.`, `2.`, ... and persist the mapping locally. Use `items` to show the saved
+numbers again, then `download --item 2`, `send --item 2`, or `download --all`.
 
 ### `monitor` options
 

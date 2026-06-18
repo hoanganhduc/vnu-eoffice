@@ -10,12 +10,21 @@ from .client import VnuClient
 from .documents import (
     download_documents,
     fetch_documents,
-    parse_document_refs,
     search_documents,
     send_documents,
 )
-from .monitor import run_once
-from .notify import TelegramNotifier, save_chat_id
+from .items import (
+    format_download_summary,
+    format_listing,
+    format_mapping_listing,
+    format_monitor_result,
+    load_mapping,
+    resolve_document_refs,
+    save_mapping,
+    split_text,
+)
+from .monitor import delete_files, run_once, save_seen
+from .notify import TelegramNotifier, esc, save_chat_id
 
 
 def _modules(arg: str) -> tuple[str, ...]:
@@ -35,13 +44,6 @@ def _schedule_interval(arg: str) -> int:
         raise argparse.ArgumentTypeError("--every must be an integer") from e
     try:
         return scheduler.validate_interval(value)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e)) from e
-
-
-def _document_refs(ids: list[str], default_module: str):
-    try:
-        return parse_document_refs(ids, default_module=default_module)
     except ValueError as e:
         raise argparse.ArgumentTypeError(str(e)) from e
 
@@ -86,14 +88,22 @@ def cmd_setup_telegram(args) -> int:
 
 def cmd_list(args) -> int:
     client = VnuClient().login()
+    docs = []
     for module in args.modules:
-        total, docs = fetch_documents(module=module, client=client,
-                                      limit=args.limit, pages=args.pages)
-        print(f"\n== {config.MODULES[module]['label']} (total {total}) ==")
-        for d in docs:
-            att = "📎" if d.has_attach else "  "
-            print(f" {att} [{d.intid}] {d.date_short} "
-                  f"{d.number:>5} {d.symbol[:16]:16} | {d.subject[:60]}")
+        _, module_docs = fetch_documents(
+            module=module,
+            client=client,
+            limit=args.limit,
+            pages=args.pages,
+        )
+        docs.extend(module_docs)
+    save_mapping("latest", docs, modules=args.modules)
+    print(format_listing(
+        "VNU eOffice latest documents",
+        f"Latest documents - scanned {args.pages} page(s).",
+        docs,
+        args.modules,
+    ))
     return 0
 
 
@@ -109,38 +119,61 @@ def cmd_search(args) -> int:
         unread_only=False,
         has_attach=args.has_attach,
     )
+    save_mapping("search", docs, query=query, modules=args.modules)
     if not docs:
-        print("No matching documents.")
+        print(format_listing(
+            "VNU eOffice document search",
+            f"Search: {query}\nScanned {args.pages} page(s).",
+            docs,
+            args.modules,
+        ))
         return 0
-    for d in docs:
-        att = "📎" if d.has_attach else "  "
-        print(f"{d.module}:{d.intid} {att} {d.date_short} "
-              f"{d.number:>5} {d.symbol[:16]:16} | {d.subject[:80]}")
+    print(format_listing(
+        "VNU eOffice document search",
+        f"Search: {query}\nScanned {args.pages} page(s).",
+        docs,
+        args.modules,
+    ))
+    return 0
+
+
+def cmd_items(args) -> int:
+    print(format_mapping_listing(load_mapping(args.source)))
     return 0
 
 
 def cmd_download(args) -> int:
+    refs = resolve_document_refs(
+        ids=args.ids,
+        items=args.items,
+        all_items=args.all,
+        source=args.source,
+        default_module=args.module,
+    )
     client = VnuClient().login()
-    refs = _document_refs(args.ids, args.module)
     items = download_documents(
         client,
         refs,
         dest_dir=Path(args.dest_dir) if args.dest_dir else None,
         lookup_limit=args.lookup_limit,
     )
-    total = sum(len(item.files) for item in items)
-    print(f"Downloaded {total} file(s) from {len(items)} document(s):")
+    print(format_download_summary(items, sent=False, deleted=False))
     for item in items:
-        print(f"  {item.doc.module}:{item.doc.intid} {item.doc.symbol} | {item.doc.subject[:80]}")
         for path in item.files:
-            print("    ", path)
+            print("  ", path)
     return 0
 
 
 def cmd_send(args) -> int:
+    refs = resolve_document_refs(
+        ids=args.ids,
+        items=args.items,
+        all_items=args.all,
+        source=args.source,
+        default_module=args.module,
+    )
     client = VnuClient().login()
     notifier = TelegramNotifier.from_config()
-    refs = _document_refs(args.ids, args.module)
     items = send_documents(
         client,
         notifier,
@@ -149,28 +182,60 @@ def cmd_send(args) -> int:
         dest_dir=Path(args.dest_dir) if args.dest_dir else None,
         lookup_limit=args.lookup_limit,
     )
-    total = sum(len(item.files) for item in items)
-    print(f"Sent {len(items)} document(s), {total} attachment file(s).")
-    if args.delete_after:
-        print("Deleted local downloaded files after sending.")
+    print(format_download_summary(items, sent=True, deleted=args.delete_after))
     return 0
 
 
 def cmd_monitor(args) -> int:
+    should_notify = not args.no_notify and not args.dry_run
     result = run_once(
         modules=args.modules, limit=args.limit,
         pages=args.pages,
-        download=args.download, delete_after=args.delete_after,
-        send_files=args.send_files, notify=not args.no_notify, dry_run=args.dry_run,
+        download=args.download or args.send_files,
+        delete_after=False,
+        send_files=False,
+        notify=False,
+        dry_run=args.dry_run,
+        notify_alerts=False,
+        save_seen_state=False,
     )
-    print(result.summary())
-    if not args.quiet:
-        for a in result.alerts:
-            print(f"  [{a.doc.module}] {a.doc.symbol} — {a.doc.subject[:70]}"
-                  + ("  (files deleted)" if a.deleted else ""))
+    text = format_monitor_result(result, args.modules)
+    if args.quiet:
+        print(result.summary())
+    else:
+        print(text)
+
+    alert_docs = [alert.doc for alert in result.alerts]
+    delivery_error = None
+    should_send_summary = should_notify and (alert_docs or (result.first_run and result.baseline_modules))
+    if should_send_summary:
+        try:
+            notifier = TelegramNotifier.from_config()
+            send_plain_text(notifier, text)
+            if args.send_files:
+                for alert in result.alerts:
+                    for path in alert.files:
+                        notifier.send_document(path, caption=f"{alert.doc.symbol} - {alert.doc.subject[:120]}")
+        except Exception as e:
+            delivery_error = f"summary delivery failed: {e}"
+            result.errors.append(delivery_error)
+
+    if args.delete_after:
+        delete_files(path for alert in result.alerts for path in alert.files)
+
+    if not args.dry_run and delivery_error is None:
+        save_seen(result.seen_state)
+        if alert_docs:
+            save_mapping("monitor", alert_docs, query="new monitor alerts", modules=args.modules)
+
     for e in result.errors:
         print("  ! ", e)
     return 1 if result.errors else 0
+
+
+def send_plain_text(notifier: TelegramNotifier, text: str) -> None:
+    for chunk in split_text(text, 3800):
+        notifier.send_message(esc(chunk))
 
 
 def cmd_schedule(args) -> int:
@@ -219,10 +284,18 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--has-attach", action="store_true", help="Only documents with attachments")
     sp.set_defaults(func=cmd_search)
 
+    sp = sub.add_parser("items", help="Show saved numbered items from the last list/search/monitor run")
+    sp.add_argument("--source", choices=("any", "latest", "search", "monitor"), default="any")
+    sp.set_defaults(func=cmd_items)
+
     sp = sub.add_parser("download", help="Download document attachment(s)")
     sp.add_argument("--module", choices=list(config.MODULES), default="den")
-    sp.add_argument("--id", dest="ids", required=True, action="append",
+    sp.add_argument("--id", dest="ids", action="append", default=[],
                     help="Document intid; repeatable. Accepts module:id.")
+    sp.add_argument("--item", dest="items", action="append", default=[],
+                    help="Saved item number, comma-list, or range.")
+    sp.add_argument("--all", action="store_true", help="Use every saved item.")
+    sp.add_argument("--source", choices=("any", "latest", "search", "monitor"), default="any")
     sp.add_argument("--dest-dir", help="Download root directory")
     sp.add_argument("--lookup-limit", type=int, default=200,
                     help="Fallback recent-document lookup window")
@@ -230,8 +303,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("send", help="Download and send document attachment(s) via Telegram")
     sp.add_argument("--module", choices=list(config.MODULES), default="den")
-    sp.add_argument("--id", dest="ids", required=True, action="append",
+    sp.add_argument("--id", dest="ids", action="append", default=[],
                     help="Document intid; repeatable. Accepts module:id.")
+    sp.add_argument("--item", dest="items", action="append", default=[],
+                    help="Saved item number, comma-list, or range.")
+    sp.add_argument("--all", action="store_true", help="Use every saved item.")
+    sp.add_argument("--source", choices=("any", "latest", "search", "monitor"), default="any")
     sp.add_argument("--dest-dir", help="Download root directory")
     sp.add_argument("--lookup-limit", type=int, default=200,
                     help="Fallback recent-document lookup window")

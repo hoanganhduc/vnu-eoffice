@@ -64,6 +64,7 @@ DATA_DIR = Path(os.environ.get(
 STATE_DIR = DATA_DIR / "state"
 DOCS_DIR = Path(os.environ.get("VNU_DOCS_DIR", str(DATA_DIR / "documents")))
 SEEN_FILE = STATE_DIR / "seen.json"
+ITEMS_FILE = Path(os.environ.get("VNU_ITEMS_FILE", str(STATE_DIR / "last_items.json")))
 TELEGRAM_STATE_FILE = STATE_DIR / "telegram.json"
 
 

@@ -20,6 +20,7 @@ else
   fi
 fi
 
+export VNU_ITEMS_FILE="${VNU_ITEMS_FILE:-${VNU_OPENCLAW_DATA_DIR}/state/last_items.json}"
 export PYTHONPATH="${VNU_EOFFICE_REPO}${PYTHONPATH:+:${PYTHONPATH}}"
 
 exec python3 "${SCRIPT_DIR}/vnu_eoffice_openclaw.py" "$@"

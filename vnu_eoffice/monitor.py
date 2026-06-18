@@ -79,6 +79,7 @@ class RunResult:
     new_count: int = 0
     alerts: list[Alert] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    seen_state: dict = field(default_factory=dict, repr=False)
 
     def summary(self) -> str:
         if self.first_run and self.baseline_modules:
@@ -125,6 +126,8 @@ def run_once(
     dry_run: bool = False,
     client: VnuClient | None = None,
     notifier: TelegramNotifier | None = None,
+    notify_alerts: bool = True,
+    save_seen_state: bool = True,
 ) -> RunResult:
     if not modules:
         raise ValueError("At least one module must be selected.")
@@ -173,7 +176,8 @@ def run_once(
                             delete_after,
                             send_files,
                             dry_run,
-                            require_delivery=notify,
+                            require_delivery=notify and notify_alerts,
+                            send_alert_message=notify_alerts,
                         )
                     )
                 except Exception as e:
@@ -184,10 +188,11 @@ def run_once(
         ids_to_remember = [doc_state_ids[d.intid] for d in docs if doc_state_ids[d.intid] not in failed_ids]
         seen[module] = _merge_seen(ids_to_remember, seen.get(module, []))
 
-    if not dry_run:
+    result.seen_state = seen
+    if save_seen_state and not dry_run:
         save_seen(seen)
 
-    if first_run and notifier and not dry_run:
+    if notify_alerts and first_run and notifier and not dry_run:
         try:
             notifier.send_message(
                 f"✅ <b>VNU e-office monitor đã bắt đầu.</b>\n"
@@ -200,7 +205,8 @@ def run_once(
 
 
 def _handle_alert(client, notifier, doc, download, delete_after,
-                  send_files, dry_run, require_delivery=True) -> Alert:
+                  send_files, dry_run, require_delivery=True,
+                  send_alert_message=True) -> Alert:
     files: list[Path] = []
     alert = Alert(doc=doc, files=files)
     try:
@@ -211,7 +217,7 @@ def _handle_alert(client, notifier, doc, download, delete_after,
         if require_delivery and notifier is None and not dry_run:
             raise RuntimeError("Telegram notifier is unavailable.")
 
-        if notifier and not dry_run:
+        if notifier and send_alert_message and not dry_run:
             notifier.send_message(format_alert(doc, files))
             if send_files:
                 for f in files:
@@ -240,6 +246,10 @@ def _delete_files(files: list[Path]) -> None:
                 d.rmdir()
         except OSError:
             pass
+
+
+def delete_files(files) -> None:
+    _delete_files([Path(path) for path in files])
 
 
 def _merge_seen(newest_ids: list[str], old_ids: list[str]) -> list[str]:

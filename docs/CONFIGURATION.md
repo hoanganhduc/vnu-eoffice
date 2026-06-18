@@ -63,6 +63,7 @@ Files under this directory include:
 |---|---|
 | `state/seen.json` | Dedup state for already-seen document ids. |
 | `state/telegram.json` | Locally saved Telegram chat id from `setup-telegram`. |
+| `state/last_items.json` | Saved numbered items from the latest list/search/monitor result. |
 | `documents/` | Optional downloaded document attachments. |
 | `monitor.log` | Cron output when the scheduler is installed. |
 
@@ -71,6 +72,7 @@ Overrides:
 ```bash
 export VNU_DATA_DIR=/path/to/state-root
 export VNU_DOCS_DIR=/path/to/downloaded-documents
+export VNU_ITEMS_FILE=/path/to/last_items.json
 ```
 
 ## First Run

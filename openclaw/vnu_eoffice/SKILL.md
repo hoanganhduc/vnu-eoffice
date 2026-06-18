@@ -15,7 +15,7 @@ Core operating rules:
 - Only download and send document files when the user explicitly asks for files or asks to download/send results.
 - After sending files, delete local copies unless the user explicitly asks to keep them.
 - When showing latest/search results, preserve the item numbers from the helper output. Follow-up requests like "download all documents of item 5" refer to those saved item numbers.
-- Every latest/search/monitor fetch records numbered items. Use `items` to show the saved numbering again before downloading if the user's reference is ambiguous.
+- Every latest/search/monitor fetch records package-owned numbered items. Use `items` to show the saved numbering again before downloading if the user's reference is ambiguous.
 - Always show both categories when listing documents: incoming (`den`) and outgoing (`di`).
 - Ignore eOffice read/unread state. The user may also read posts manually in a web browser, so selection and monitoring must rely on fetched document ids instead.
 - Fetch multiple pages by default. Use `--pages N` when the user asks for a deeper or shallower scan.
@@ -26,6 +26,7 @@ Environment:
 - Helper launcher inside OpenClaw agent runs: `/workspace/skills/vnu-eoffice/run_vnu_eoffice.sh`
 - Host-installed helper launcher: `/home/ubuntu/.openclaw/skills/vnu-eoffice/run_vnu_eoffice.sh`
 - OpenClaw state folder inside agent runs: `/workspace/data/vnu_eoffice/state`
+- Saved item mapping inside agent runs: `/workspace/data/vnu_eoffice/state/last_items.json`
 - Temporary document folder inside agent runs: `/workspace/data/vnu_eoffice/documents`
 
 Use these helper commands:
