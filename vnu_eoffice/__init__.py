@@ -1,4 +1,4 @@
-"""vnu_eoffice — automate retrieval, analysis, and alerting for the VNU e-office.
+"""vnu_eoffice — automate retrieval and alerting for the VNU e-office.
 
 Targets the SELAB NetOffice document system at https://eoffice.vnu.edu.vn/qlvb/.
 Handles both "Văn bản đến" (incoming) and "Văn bản đi" (outgoing) modules.
@@ -13,7 +13,6 @@ from .documents import (
     search_documents,
     send_documents,
 )
-from .importance import Score, score_document
 from .notify import TelegramNotifier
 
 __version__ = "0.1.0"
@@ -26,7 +25,5 @@ __all__ = [
     "fetch_documents",
     "search_documents",
     "send_documents",
-    "Score",
-    "score_document",
     "TelegramNotifier",
 ]

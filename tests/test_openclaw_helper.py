@@ -74,6 +74,13 @@ class TestOpenClawHelper(unittest.TestCase):
         self.assertEqual(search.pages, 2)
         self.assertEqual(monitor.pages, 2)
 
+    def test_monitor_min_level_flag_is_removed(self):
+        helper = load_helper()
+        parser = helper.build_parser()
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["monitor", "--min-level", "LOW"])
+
     def test_latest_limit_is_display_count_not_pages_times_limit(self):
         helper = load_helper()
         client = FakeClient({

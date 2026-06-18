@@ -10,7 +10,7 @@ from vnu_eoffice.models import Document
 from vnu_eoffice.monitor import HASHED_SEEN_PREFIX, _handle_alert, load_seen, run_once, save_seen
 
 
-def doc(intid="1", subject="hỏa tốc", module="den"):
+def doc(intid="1", subject="Routine update", module="den"):
     return Document(
         module=module,
         intid=intid,
@@ -81,7 +81,6 @@ class TestMonitorState(TempConfigMixin, unittest.TestCase):
         save_seen({"_initialized_modules": ["den"], "den": []})
         result = run_once(
             modules=("den",),
-            min_level="LOW",
             client=FakeClient({"den": [doc("1")]}),
             notifier=FailingNotifier(),
             notify=True,
@@ -93,7 +92,6 @@ class TestMonitorState(TempConfigMixin, unittest.TestCase):
         save_seen({"_initialized_modules": ["den"], "den": []})
         result = run_once(
             modules=("den",),
-            min_level="LOW",
             client=FakeClient({"den": [doc("1")]}),
             notifier=OkNotifier(),
             notify=True,
@@ -123,7 +121,6 @@ class TestMonitorState(TempConfigMixin, unittest.TestCase):
             modules=("den",),
             limit=1,
             pages=2,
-            min_level="LOW",
             client=client,
             notifier=OkNotifier(),
             notify=True,
@@ -171,13 +168,6 @@ class TestAlertCleanup(unittest.TestCase):
                     DownloadingClient(),
                     FailingNotifier(),
                     doc("1"),
-                    score=type("Score", (), {
-                        "emoji": "x",
-                        "level": "HIGH",
-                        "value": 10,
-                        "reasons": [],
-                        "deadline_hint": "",
-                    })(),
                     download=True,
                     delete_after=True,
                     send_files=False,

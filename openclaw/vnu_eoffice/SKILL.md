@@ -17,7 +17,7 @@ Core operating rules:
 - When showing latest/search results, preserve the item numbers from the helper output. Follow-up requests like "download all documents of item 5" refer to those saved item numbers.
 - Every latest/search/monitor fetch records numbered items. Use `items` to show the saved numbering again before downloading if the user's reference is ambiguous.
 - Always show both categories when listing documents: incoming (`den`) and outgoing (`di`).
-- Ignore eOffice read/unread state. The user may also read posts manually in a web browser, so selection and monitoring must rely on fetched document ids and keyword/category filters instead.
+- Ignore eOffice read/unread state. The user may also read posts manually in a web browser, so selection and monitoring must rely on fetched document ids instead.
 - Fetch multiple pages by default. Use `--pages N` when the user asks for a deeper or shallower scan.
 - If a user asks for "top k" latest documents, pass that value as `--limit K`.
 - If a user asks to search and then choose selectively, run search first, report the numbered results, then wait for their chosen item numbers.
@@ -37,7 +37,7 @@ Use these helper commands:
 2) Run one update monitor pass
 - `/workspace/skills/vnu-eoffice/run_vnu_eoffice.sh monitor --no-notify`
 - `/workspace/skills/vnu-eoffice/run_vnu_eoffice.sh monitor --dry-run`
-- `/workspace/skills/vnu-eoffice/run_vnu_eoffice.sh monitor --limit 60 --pages 2 --min-level MEDIUM`
+- `/workspace/skills/vnu-eoffice/run_vnu_eoffice.sh monitor --limit 60 --pages 2`
 
 3) List latest documents
 - `/workspace/skills/vnu-eoffice/run_vnu_eoffice.sh latest --limit 10`
@@ -70,5 +70,5 @@ Natural-language routing examples:
 Cron behavior:
 - The OpenClaw cron job should run the monitor helper every 4 hours.
 - The monitor records a first-run baseline without alerting on the whole backlog.
-- Later runs alert only on new documents that meet the configured importance threshold.
+- Later runs alert on every new document.
 - If Telegram delivery is unavailable, report the helper error instead of pretending a notification was sent.

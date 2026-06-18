@@ -1,8 +1,8 @@
-"""Polling orchestration: fetch -> dedup -> score -> alert -> (download) -> (delete).
+"""Polling orchestration: fetch -> dedup -> alert -> (download) -> (delete).
 
 Runs entirely locally. On the very first run it records a baseline of the
 documents currently visible (without alerting on the whole backlog); subsequent
-runs alert only on genuinely new documents that meet the importance threshold.
+runs alert on every genuinely new document.
 """
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ from pathlib import Path
 from . import config
 from .client import VnuClient
 from .documents import fetch_documents
-from .importance import Score, score_document
 from .models import Document
 from .notify import TelegramNotifier, esc
 
@@ -68,7 +67,6 @@ def remember_module_initialized(state: dict, module: str) -> None:
 @dataclass
 class Alert:
     doc: Document
-    score: Score
     files: list[Path] = field(default_factory=list)
     deleted: bool = False
 
@@ -97,10 +95,10 @@ class RunResult:
 
 
 # -- alert formatting --------------------------------------------------------
-def format_alert(doc: Document, score: Score, files: list[Path]) -> str:
+def format_alert(doc: Document, files: list[Path]) -> str:
     m = config.MODULES[doc.module]
     lines = [
-        f"{score.emoji} <b>[{score.level}] {esc(doc.module_label)} mới</b>",
+        f"📄 <b>{esc(doc.module_label)} mới</b>",
         f"<b>{esc(m['number_label'])}:</b> {esc(doc.number)}  •  {esc(doc.date_short)}",
     ]
     if doc.symbol:
@@ -108,10 +106,6 @@ def format_alert(doc: Document, score: Score, files: list[Path]) -> str:
     if doc.party:
         lines.append(f"<b>{esc(m['party_label'])}:</b> {esc(doc.party)}")
     lines.append(f"<b>Trích yếu:</b> {esc(doc.subject)}")
-    if score.deadline_hint:
-        lines.append(f"⏰ <b>Hạn:</b> {esc(score.deadline_hint)}")
-    if score.reasons:
-        lines.append(f"<i>Lý do (score {score.value}):</i> {esc('; '.join(score.reasons))}")
     if doc.has_attach:
         n = len(files)
         lines.append(f"📎 {n} đính kèm" + (" — đã tải về" if n else ""))
@@ -124,7 +118,6 @@ def run_once(
     modules: tuple[str, ...] = config.DEFAULT_MODULES,
     limit: int = 60,
     pages: int = config.DEFAULT_FETCH_PAGES,
-    min_level: str = "MEDIUM",
     download: bool = False,
     delete_after: bool = False,
     send_files: bool = False,
@@ -170,14 +163,19 @@ def run_once(
         failed_ids: set[str] = set()
         if module in initialized:
             for doc in new_docs:
-                score = score_document(doc)
-                if not score.meets(min_level):
-                    continue
                 try:
                     result.alerts.append(
-                        _handle_alert(client, notifier, doc, score,
-                                      download, delete_after, send_files, dry_run,
-                                      require_delivery=notify))
+                        _handle_alert(
+                            client,
+                            notifier,
+                            doc,
+                            download,
+                            delete_after,
+                            send_files,
+                            dry_run,
+                            require_delivery=notify,
+                        )
+                    )
                 except Exception as e:
                     failed_ids.add(doc_state_ids[doc.intid])
                     result.errors.append(f"[{module}] alert delivery failed: {e}")
@@ -194,17 +192,17 @@ def run_once(
             notifier.send_message(
                 f"✅ <b>VNU e-office monitor đã bắt đầu.</b>\n"
                 f"Đang theo dõi: {esc(', '.join(config.MODULES[m]['label'] for m in modules))}.\n"
-                f"Sẽ thông báo văn bản mới quan trọng (mức ≥ {esc(min_level)}).")
+                "Sẽ thông báo tất cả văn bản mới.")
         except Exception as e:
             result.errors.append(f"baseline notify failed: {e}")
 
     return result
 
 
-def _handle_alert(client, notifier, doc, score, download, delete_after,
+def _handle_alert(client, notifier, doc, download, delete_after,
                   send_files, dry_run, require_delivery=True) -> Alert:
     files: list[Path] = []
-    alert = Alert(doc=doc, score=score, files=files)
+    alert = Alert(doc=doc, files=files)
     try:
         if download and doc.has_attach and not dry_run:
             files = client.download_all(doc)
@@ -214,7 +212,7 @@ def _handle_alert(client, notifier, doc, score, download, delete_after,
             raise RuntimeError("Telegram notifier is unavailable.")
 
         if notifier and not dry_run:
-            notifier.send_message(format_alert(doc, score, files))
+            notifier.send_message(format_alert(doc, files))
             if send_files:
                 for f in files:
                     notifier.send_document(f, caption=f"{doc.symbol} — {doc.subject[:120]}")

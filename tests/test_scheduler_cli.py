@@ -1,4 +1,6 @@
 """Offline tests for scheduler and CLI argument validation."""
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,6 +40,17 @@ class TestScheduler(unittest.TestCase):
             self.assertTrue(scheduler.remove())
         self.assertEqual(calls[0][:3], ["schtasks", "/Delete", "/TN"])
 
+    def test_schedule_preview_has_no_importance_threshold(self):
+        parser = build_parser()
+        args = parser.parse_args(["schedule", "--preview"])
+
+        with patch("vnu_eoffice.scheduler.preview", return_value="cron line") as preview, \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(args.func(args), 0)
+
+        monitor_args = preview.call_args.args[1]
+        self.assertNotIn("--min-level", monitor_args)
+
 
 class TestCliValidation(unittest.TestCase):
     def test_empty_modules_rejected(self):
@@ -72,6 +85,11 @@ class TestCliValidation(unittest.TestCase):
         args = parser.parse_args(["send", "--id", "den:1", "--delete-after"])
         self.assertEqual(args.ids, ["den:1"])
         self.assertTrue(args.delete_after)
+
+    def test_score_command_is_removed(self):
+        parser = build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["score", "hỏa tốc"])
 
 
 if __name__ == "__main__":

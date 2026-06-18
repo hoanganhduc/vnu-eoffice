@@ -100,7 +100,7 @@ vnu-eoffice setup-telegram --chat-id 123456789
 
 ## Monitoring
 
-Preview what would be scored without sending alerts or writing state:
+Preview what would be reported without sending alerts or writing state:
 
 ```bash
 vnu-eoffice monitor --once --dry-run --no-notify
@@ -113,15 +113,14 @@ vnu-eoffice monitor --once
 ```
 
 The first real pass records a baseline and does not alert on the backlog. Later
-passes alert only on new documents whose score meets the selected threshold.
+passes alert on every new document.
 
 Common options:
 
 ```bash
 vnu-eoffice monitor --once \
   --modules den,di \
-  --limit 60 \
-  --min-level MEDIUM
+  --limit 60
 ```
 
 Use downloads only when needed:
@@ -179,23 +178,6 @@ vnu-eoffice schedule --remove
 
 On Linux and macOS this manages a tagged crontab entry. On Windows it generates
 a Task Scheduler entry with `schtasks`.
-
-## Scoring Tuning
-
-Scoring rules live in `vnu_eoffice/importance.py`.
-
-The `RULES` mapping is intentionally simple: each category contributes the best
-matching phrase found in the document subject plus sender/recipient text. Add
-unit names, personal names, or project terms under `Liên quan trực tiếp` to
-boost documents that concern you directly.
-
-Thresholds:
-
-| Level | Score |
-|---|---:|
-| `HIGH` | `>= 8` |
-| `MEDIUM` | `>= 4` |
-| `LOW` | `< 4` |
 
 ## Privacy Notes
 

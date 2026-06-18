@@ -63,7 +63,7 @@ Out of scope:
 
 - `python3 -m unittest discover -v`
 - `python3 -m compileall vnu_eoffice tests`
-- CLI smoke checks for `score`, scheduler preview, and invalid scheduler/module args.
+- CLI smoke checks for scheduler preview and invalid scheduler/module args.
 
 ## Risks
 

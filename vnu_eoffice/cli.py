@@ -14,7 +14,6 @@ from .documents import (
     search_documents,
     send_documents,
 )
-from .importance import score_text
 from .monitor import run_once
 from .notify import TelegramNotifier, save_chat_id
 
@@ -92,9 +91,8 @@ def cmd_list(args) -> int:
                                       limit=args.limit, pages=args.pages)
         print(f"\n== {config.MODULES[module]['label']} (total {total}) ==")
         for d in docs:
-            sc = score_text(d.subject, d.party)
             att = "📎" if d.has_attach else "  "
-            print(f" {att} {sc.emoji}{sc.value:>2} [{d.intid}] {d.date_short} "
+            print(f" {att} [{d.intid}] {d.date_short} "
                   f"{d.number:>5} {d.symbol[:16]:16} | {d.subject[:60]}")
     return 0
 
@@ -115,20 +113,9 @@ def cmd_search(args) -> int:
         print("No matching documents.")
         return 0
     for d in docs:
-        sc = score_text(d.subject, d.party)
         att = "📎" if d.has_attach else "  "
-        print(f"{d.module}:{d.intid} {att} {sc.emoji}{sc.value:>2} "
-              f"{d.date_short} {d.number:>5} {d.symbol[:16]:16} | {d.subject[:80]}")
-    return 0
-
-
-def cmd_score(args) -> int:
-    sc = score_text(args.text)
-    print(f"score={sc.value} level={sc.level}")
-    for r in sc.reasons:
-        print("  -", r)
-    if sc.deadline_hint:
-        print("  deadline:", sc.deadline_hint)
+        print(f"{d.module}:{d.intid} {att} {d.date_short} "
+              f"{d.number:>5} {d.symbol[:16]:16} | {d.subject[:80]}")
     return 0
 
 
@@ -171,7 +158,7 @@ def cmd_send(args) -> int:
 
 def cmd_monitor(args) -> int:
     result = run_once(
-        modules=args.modules, limit=args.limit, min_level=args.min_level,
+        modules=args.modules, limit=args.limit,
         pages=args.pages,
         download=args.download, delete_after=args.delete_after,
         send_files=args.send_files, notify=not args.no_notify, dry_run=args.dry_run,
@@ -179,7 +166,7 @@ def cmd_monitor(args) -> int:
     print(result.summary())
     if not args.quiet:
         for a in result.alerts:
-            print(f"  {a.score.emoji} [{a.doc.module}] {a.doc.symbol} — {a.doc.subject[:70]}"
+            print(f"  [{a.doc.module}] {a.doc.symbol} — {a.doc.subject[:70]}"
                   + ("  (files deleted)" if a.deleted else ""))
     for e in result.errors:
         print("  ! ", e)
@@ -187,7 +174,7 @@ def cmd_monitor(args) -> int:
 
 
 def cmd_schedule(args) -> int:
-    margs = (f"monitor --once --modules {','.join(args.modules)} --min-level {args.min_level}"
+    margs = (f"monitor --once --modules {','.join(args.modules)}"
              + f" --pages {args.pages}"
              + (" --download" if args.download else "")
              + (" --delete-after" if args.delete_after else "")
@@ -207,7 +194,7 @@ def cmd_schedule(args) -> int:
 # -- parser ------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="vnu-eoffice",
-                                description="Retrieve, score, and alert on VNU e-office documents (local-only).")
+                                description="Retrieve and alert on VNU e-office documents (local-only).")
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("test-login", help="Verify credentials and show document counts").set_defaults(func=cmd_test_login)
@@ -216,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--chat-id", help="Use this chat id directly")
     sp.set_defaults(func=cmd_setup_telegram)
 
-    sp = sub.add_parser("list", help="List recent documents with importance scores")
+    sp = sub.add_parser("list", help="List recent documents")
     sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
     sp.add_argument("--limit", type=int, default=20, help="Documents per page")
     sp.add_argument("--pages", type=int, default=config.DEFAULT_FETCH_PAGES,
@@ -231,10 +218,6 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"Pages to fetch per module (default {config.DEFAULT_FETCH_PAGES})")
     sp.add_argument("--has-attach", action="store_true", help="Only documents with attachments")
     sp.set_defaults(func=cmd_search)
-
-    sp = sub.add_parser("score", help="Test the importance scorer on a phrase")
-    sp.add_argument("text")
-    sp.set_defaults(func=cmd_score)
 
     sp = sub.add_parser("download", help="Download document attachment(s)")
     sp.add_argument("--module", choices=list(config.MODULES), default="den")
@@ -256,13 +239,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Delete local downloaded files after sending")
     sp.set_defaults(func=cmd_send)
 
-    sp = sub.add_parser("monitor", help="Run one polling pass (fetch/score/alert)")
+    sp = sub.add_parser("monitor", help="Run one polling pass (fetch/alert)")
     sp.add_argument("--once", action="store_true", help="(default) single pass")
     sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
     sp.add_argument("--limit", type=int, default=60, help="Documents per page")
     sp.add_argument("--pages", type=int, default=config.DEFAULT_FETCH_PAGES,
                     help=f"Pages to fetch per module (default {config.DEFAULT_FETCH_PAGES})")
-    sp.add_argument("--min-level", choices=["LOW", "MEDIUM", "HIGH"], default="MEDIUM")
     sp.add_argument("--download", action="store_true", help="Download attachments of alerted docs")
     sp.add_argument("--delete-after", action="store_true",
                     help="Delete downloaded files after checking and sending")
@@ -278,7 +260,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--modules", type=_modules, default=config.DEFAULT_MODULES)
     sp.add_argument("--pages", type=int, default=config.DEFAULT_FETCH_PAGES,
                     help=f"Pages to fetch per module (default {config.DEFAULT_FETCH_PAGES})")
-    sp.add_argument("--min-level", choices=["LOW", "MEDIUM", "HIGH"], default="MEDIUM")
     sp.add_argument("--download", action="store_true")
     sp.add_argument("--delete-after", action="store_true")
     sp.add_argument("--preview", action="store_true", help="Print the schedule line without installing")

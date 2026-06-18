@@ -1,14 +1,13 @@
 # vnu-eoffice
 
-Retrieve, analyse, and alert on documents from the **VNU e-office**
+Retrieve and alert on documents from the **VNU e-office**
 (SELAB NetOffice) at <https://eoffice.vnu.edu.vn/qlvb/> — **fully local**.
 
 It logs into the *local "Office account"* form with your username/password,
 polls both document modules — **Văn bản đến** (incoming) and **Văn bản đi**
-(outgoing) — scores each new document for importance using a transparent,
-keyword-based rule set that runs **entirely on your machine**, and sends a
-Telegram alert for the ones that matter. It can optionally download a document's
-attachments and delete them again after the alert attempt.
+(outgoing) — and sends a Telegram alert for every new document after the first
+baseline run. It can optionally download a document's attachments and delete
+them again after the alert attempt.
 
 > No document text or metadata is ever sent to any third-party AI service.
 > The only outbound traffic is (1) to `eoffice.vnu.edu.vn` to read your own
@@ -20,10 +19,8 @@ attachments and delete them again after the alert attempt.
 
 - 🔐 Local username/password login (PHPSESSID session); no SSO required.
 - 📥 Both modules: **Văn bản đến** (`office/receive`) and **Văn bản đi** (`office/dispatch`).
-- 🧮 **Local** importance scoring — urgency (`hỏa tốc`, `khẩn`), deadlines
-  (`trước ngày`, `hạn nộp`), action cues (`đề nghị`, `góp ý`), meetings
-  (`giấy mời`), document type, and important senders. Fully auditable and tunable.
-- 🔔 Telegram alerts with subject, sender, deadline, score reasons, and a link.
+- 🔔 Telegram alerts for every new document, with subject, sender/recipient,
+  document metadata, attachment count, and a link.
 - 📎 Optional attachment download, with an **opt-in `--delete-after`** to wipe
   local copies once the document has been checked and the alert attempt finishes.
 - ⏰ Cross-platform scheduling: **cron** (Linux/macOS) or **Task Scheduler** (Windows).
@@ -84,10 +81,9 @@ vnu-eoffice schedule --every 15
 |---|---|
 | `test-login` | Verify credentials; print document counts for both modules. |
 | `setup-telegram [--chat-id N]` | Discover & save the Telegram chat id (message the bot first). |
-| `list [--modules den,di] [--limit N] [--unread]` | List recent documents with scores. |
-| `score "<text>"` | Try the scorer on any phrase (offline). |
+| `list [--modules den,di] [--limit N]` | List recent documents. |
 | `download --module den --id <intid>` | Download one document's attachments. |
-| `monitor [options]` | One polling pass: fetch → score → alert → (download) → (delete). |
+| `monitor [options]` | One polling pass: fetch → alert → (download) → (delete). |
 | `schedule [options]` | Install/preview/remove the recurring scheduled job. |
 
 ### `monitor` options
@@ -95,7 +91,6 @@ vnu-eoffice schedule --every 15
 ```
 --modules den,di       Which modules to poll (default both)
 --limit 60             How many recent docs to scan per module
---min-level MEDIUM     Alert threshold: LOW | MEDIUM | HIGH
 --download             Download attachments of alerted documents
 --delete-after         Delete downloaded files after the alert attempt
 --send-files           Also push the files to Telegram (sends content off-machine)
@@ -109,7 +104,6 @@ vnu-eoffice schedule --every 15
 ```
 --every 15             Minutes between runs
 --modules den,di       Modules to poll
---min-level MEDIUM     Alert threshold
 --download             (passed through to monitor)
 --delete-after         (passed through to monitor)
 --preview              Print the cron / schtasks line without installing
@@ -117,27 +111,6 @@ vnu-eoffice schedule --every 15
 ```
 
 Scheduled jobs use quiet monitor output by default.
-
-## How importance scoring works
-
-Scoring is plain keyword matching on the lowercased Vietnamese subject (with
-diacritics) plus the sender/recipient, summing the best match per category:
-
-| Category | Examples | Weight |
-|---|---|---|
-| Khẩn (urgency) | hỏa tốc (10), thượng khẩn (9), khẩn (6) | high |
-| Hạn chót (deadline) | trước ngày, hạn nộp, chậm nhất | 3–4 |
-| Yêu cầu xử lý (action) | đề nghị, yêu cầu, góp ý, báo cáo | 1–3 |
-| Họp / Mời (meetings) | giấy mời, cuộc họp, hội nghị | 1–4 |
-| Loại văn bản | chỉ thị, quyết định, kế hoạch | 1–3 |
-| Nơi gửi quan trọng | Thủ tướng, Chính phủ, Cơ quan ĐHQGHN | 2–5 |
-
-Levels: **HIGH ≥ 8**, **MEDIUM ≥ 4**, otherwise **LOW**. Every point is reported
-in the alert ("Lý do"), so you can see *why* a document was flagged.
-
-**Tune it** by editing `RULES` in `vnu_eoffice/importance.py`. The
-`Liên quan trực tiếp` category is empty by design — add your unit or name
-(e.g. `"khoa học tự nhiên": 3`) to boost documents that concern you directly.
 
 ## Privacy & the `--delete-after` option
 
@@ -167,8 +140,7 @@ in the alert ("Lý do"), so you can see *why* a document was flagged.
   institution's acceptable-use rules.
 - It scrapes an undocumented ExtJS backend, so a site redesign or a switch to
   SSO-only login could require updates.
-- It does not OCR scanned attachments. Importance scoring uses document
-  metadata, especially the subject and sender/recipient.
+- It does not OCR scanned attachments. Alerts use document metadata only.
 - VNU documents may be marked internal/confidential. Keep downloads on a machine
   you control and prefer `--delete-after`; think before using `--send-files`.
 

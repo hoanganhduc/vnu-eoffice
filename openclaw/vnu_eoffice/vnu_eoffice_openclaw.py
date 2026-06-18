@@ -74,7 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_modules_arg(monitor)
     monitor.add_argument("--limit", type=positive_int, default=60)
     monitor.add_argument("--pages", type=positive_int, default=config.DEFAULT_FETCH_PAGES)
-    monitor.add_argument("--min-level", choices=("LOW", "MEDIUM", "HIGH"), default="MEDIUM")
     monitor.add_argument("--download", action="store_true", help="Download alert attachments locally.")
     monitor.add_argument("--send-files", action="store_true", help="Send alert attachments when --download is used.")
     monitor.add_argument("--delete-after", action="store_true", help="Delete alert attachments after sending.")
@@ -178,7 +177,6 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         modules=modules,
         limit=args.limit,
         pages=args.pages,
-        min_level=args.min_level,
         download=args.download or args.send_files,
         send_files=args.send_files,
         delete_after=args.delete_after,
@@ -472,7 +470,6 @@ def format_monitor_result(result, modules: Sequence[str]) -> str:
         lines.extend(format_numbered_documents(
             [alert.doc for alert in result.alerts],
             modules,
-            scores=[alert.score.level for alert in result.alerts],
         ))
     else:
         lines.append("")
@@ -504,10 +501,8 @@ def format_listing(title: str, summary: str, docs: Sequence[Document], modules: 
 def format_numbered_documents(
     docs: Sequence[Document],
     modules: Sequence[str],
-    scores: Sequence[str] | None = None,
 ) -> list[str]:
     lines: list[str] = []
-    score_by_key = {doc.key: scores[index] for index, doc in enumerate(docs)} if scores else {}
     by_module: dict[str, list[tuple[int, Document]]] = {module: [] for module in modules}
     for index, doc in enumerate(docs, start=1):
         by_module.setdefault(doc.module, []).append((index, doc))
@@ -525,8 +520,6 @@ def format_numbered_documents(
                 doc.symbol or doc.number or "-",
                 doc.has_attach,
             )
-            if score_by_key.get(doc.key):
-                meta = f"{meta} | Score: {score_by_key[doc.key]}"
             lines.append(f"{index}. {meta}")
             if doc.party:
                 lines.append(f"   Unit: {short(doc.party, 120)}")

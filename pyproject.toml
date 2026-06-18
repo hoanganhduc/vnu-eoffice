@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vnu-eoffice"
 version = "0.1.0"
-description = "Retrieve, analyse, and alert on VNU e-office (SELAB NetOffice) documents — fully local."
+description = "Retrieve and alert on VNU e-office (SELAB NetOffice) documents — fully local."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

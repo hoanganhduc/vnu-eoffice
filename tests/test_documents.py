@@ -116,5 +116,40 @@ class TestDocumentHelpers(unittest.TestCase):
             self.assertFalse(items[0].files[0].exists())
 
 
+class TestModelNormalisation(unittest.TestCase):
+    def test_outgoing_party_falls_back_to_signer(self):
+        rec = {
+            "intid": "1",
+            "strKyhieu": "9/X",
+            "strTrichyeu": "abc",
+            "strNgayky": "2026-06-12 00:00:00",
+            "intSophathanh": "9",
+            "strNoinhan": "",
+            "strNguoiky": "Trần Quốc Bình",
+            "attach": "1",
+            "statusopen": "0",
+        }
+        d = Document.from_record("di", rec)
+        self.assertEqual(d.number, "9")
+        self.assertTrue(d.has_attach)
+        self.assertTrue(d.unread)
+        self.assertIn("Trần Quốc Bình", d.party)
+
+    def test_subject_whitespace_collapsed(self):
+        rec = {
+            "intid": "2",
+            "strTrichyeu": "dòng 1\r\ndòng 2",
+            "intSoden": "3",
+            "strKyhieu": "k",
+            "strNgayden": "2026-06-12 09:00:00",
+            "strCoquanphathanh": "X",
+            "attach": "0",
+            "statusopen": "1",
+        }
+        d = Document.from_record("den", rec)
+        self.assertEqual(d.subject, "dòng 1 dòng 2")
+        self.assertFalse(d.unread)
+
+
 if __name__ == "__main__":
     unittest.main()
