@@ -65,6 +65,8 @@ STATE_DIR = DATA_DIR / "state"
 DOCS_DIR = Path(os.environ.get("VNU_DOCS_DIR", str(DATA_DIR / "documents")))
 SEEN_FILE = STATE_DIR / "seen.json"
 ITEMS_FILE = Path(os.environ.get("VNU_ITEMS_FILE", str(STATE_DIR / "last_items.json")))
+# Legacy path retained only so older callers/tests can redirect it.  The
+# package no longer reads or writes chat state.
 TELEGRAM_STATE_FILE = STATE_DIR / "telegram.json"
 
 
@@ -131,11 +133,6 @@ def get_credentials() -> tuple[str, str]:
     if not user or not pw:
         raise RuntimeError("Missing VNU credentials.")
     return user, pw
-
-
-def get_telegram_token() -> str | None:
-    secrets = load_secrets()
-    return os.environ.get("TELEGRAM_BOT_TOKEN") or secrets.get("TELEGRAM_BOT_TOKEN")
 
 
 def hash_seen_ids_enabled() -> bool:

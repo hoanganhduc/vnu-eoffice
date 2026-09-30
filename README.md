@@ -1,17 +1,17 @@
 # vnu-eoffice
 
-Retrieve and alert on documents from the **VNU e-office**
-(SELAB NetOffice) at <https://eoffice.vnu.edu.vn/qlvb/> — **fully local**.
+Retrieve documents from the **VNU e-office** (SELAB NetOffice) at
+<https://eoffice.vnu.edu.vn/qlvb/> — **fully local**.
 
 It logs into the *local "Office account"* form with your username/password,
 polls both document modules — **Văn bản đến** (incoming) and **Văn bản đi**
-(outgoing) — and sends a Telegram alert for every new document after the first
-baseline run. It can optionally download a document's attachments and delete
-them again after the alert attempt.
+(outgoing) — and can download attachments. In the OpenClaw deployment, all
+external delivery is handled by the authenticated host queue with an explicit
+channel and target; this package has no bot-token discovery or direct sender.
 
-> No document text or metadata is ever sent to any third-party AI service.
-> The only outbound traffic is (1) to `eoffice.vnu.edu.vn` to read your own
-> documents and (2) to the Telegram Bot API to deliver alerts you asked for.
+> No document text or metadata is sent to any third-party AI service. This
+> package connects only to `eoffice.vnu.edu.vn`; an authorized host delivery
+> worker is a separate capability.
 
 ---
 
@@ -19,14 +19,12 @@ them again after the alert attempt.
 
 - 🔐 Local username/password login (PHPSESSID session); no SSO required.
 - 📥 Both modules: **Văn bản đến** (`office/receive`) and **Văn bản đi** (`office/dispatch`).
-- 🔔 Telegram alerts for every new document, with subject, sender/recipient,
-  document metadata, attachment count, and a link.
-- 📎 Optional attachment download, with an **opt-in `--delete-after`** to wipe
-  local copies once the document has been checked and the alert attempt finishes.
+- 🔔 Queue-only OpenClaw delivery with an explicit channel and target policy.
+- 📎 Optional attachment download; cleanup remains an explicit caller action.
 - ⏰ Cross-platform scheduling: **cron** (Linux/macOS) or **Task Scheduler** (Windows).
 - 🧰 Dedup by document id, baseline-on-first-run (no backlog spam).
 - 🔢 Numbered latest/search/monitor results, with saved item numbers for
-  follow-up `download --item` and `send --item` requests.
+  follow-up `download --item` requests.
 
 ## Install
 
@@ -47,14 +45,11 @@ specified with `VNU_SECRETS_FILE`. Required keys:
 ```json
 {
   "VNU_EOFFICE_USERNAME": "your-username",
-  "VNU_EOFFICE_PASSWORD": "your-password",
-  "TELEGRAM_BOT_TOKEN":   "123456:ABC-...",
-  "TELEGRAM_CHAT_ID":     "optional — auto-discovered by setup-telegram"
+  "VNU_EOFFICE_PASSWORD": "your-password"
 }
 ```
 
-Equivalent env vars: `VNU_EOFFICE_USERNAME`, `VNU_EOFFICE_PASSWORD`,
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+Equivalent env vars: `VNU_EOFFICE_USERNAME`, `VNU_EOFFICE_PASSWORD`.
 
 ## Quick start
 
@@ -62,19 +57,9 @@ Equivalent env vars: `VNU_EOFFICE_USERNAME`, `VNU_EOFFICE_PASSWORD`,
 # 1. Verify login and see document counts
 vnu-eoffice test-login
 
-# 2. One-time Telegram wiring: message your bot once (send "/start" in Telegram),
-#    then capture the chat id:
-vnu-eoffice setup-telegram
-
-# 3. See what would be flagged (no alerts sent)
+# 2. Inspect documents without external delivery
 vnu-eoffice list --limit 20
 vnu-eoffice monitor --once --dry-run
-
-# 4. Run a real pass (alerts important new docs via Telegram)
-vnu-eoffice monitor --once
-
-# 5. Schedule it every 15 minutes
-vnu-eoffice schedule --every 15
 ```
 
 ## Commands
@@ -82,19 +67,19 @@ vnu-eoffice schedule --every 15
 | Command | Purpose |
 |---|---|
 | `test-login` | Verify credentials; print document counts for both modules. |
-| `setup-telegram [--chat-id N]` | Discover & save the Telegram chat id (message the bot first). |
+| `setup-telegram [--chat-id N]` | Retired compatibility command; direct delivery is disabled. |
 | `list [--modules den,di] [--limit N]` | List recent documents and save numbered items. |
 | `search <keywords> [--modules den,di]` | Search documents and save numbered items. |
 | `items [--source latest\|search\|monitor]` | Show the saved item numbers again. |
 | `download --id den:<intid>` | Download one document's attachments by direct id. |
 | `download --item 2,4` | Download attachments by saved item number. |
-| `send --item 2 --delete-after` | Send a saved item through Telegram. |
-| `monitor [options]` | One polling pass: fetch → alert → (download) → (delete). |
+| `send --item 2 --delete-after` | Retired compatibility command; use the OpenClaw host queue. |
+| `monitor [options]` | One local polling pass: fetch → report → (download) → (delete). |
 | `schedule [options]` | Install/preview/remove the recurring scheduled job. |
 
-`list`, `search`, and alerting `monitor` runs number retrieved documents as
+`list`, `search`, and `monitor` runs number retrieved documents as
 `1.`, `2.`, ... and persist the mapping locally. Use `items` to show the saved
-numbers again, then `download --item 2`, `send --item 2`, or `download --all`.
+numbers again, then `download --item 2` or `download --all`.
 
 ### `monitor` options
 
@@ -102,9 +87,9 @@ numbers again, then `download --item 2`, `send --item 2`, or `download --all`.
 --modules den,di       Which modules to poll (default both)
 --limit 60             How many recent docs to scan per module
 --download             Download attachments of alerted documents
---delete-after         Delete downloaded files after the alert attempt
---send-files           Also push the files to Telegram (sends content off-machine)
---no-notify            Don't send Telegram messages (print only)
+--delete-after         Delete downloaded files after the polling pass
+--send-files           Retired compatibility flag; direct delivery is disabled
+--no-notify            Compatibility flag; monitor output is local
 --dry-run              No downloads, sends, or state writes
 --quiet                Suppress alert subject lines in output
 ```
@@ -124,16 +109,15 @@ Scheduled jobs use quiet monitor output by default.
 
 ## Privacy & the `--delete-after` option
 
-- Default `monitor` (without `--download`) writes only local state/log data; alerts
-  are metadata-only.
+- Default `monitor` (without `--download`) writes only local state/log data.
 - With `--download`, attachments are saved under
   `~/.local/share/vnu_eoffice/documents/<module>/<number>_<id>/`.
 - Add `--delete-after` to remove those files (and the now-empty folder) after
-  the alert attempt — "check, notify, then forget".
-- `--send-files` is the only way document *content* leaves your machine, and it
-  is off by default. The metadata alert text still goes to Telegram (your choice
-  of channel).
-- Scheduled monitor output suppresses alert subject lines by default, reducing
+  the polling pass.
+- Direct Telegram notification and `--send-files` are retired. OpenClaw delivery
+  must go through the authenticated host queue with an explicit channel and
+  target.
+- Scheduled monitor output suppresses report subject lines by default, reducing
   sensitive metadata retained in local cron logs.
 
 ## Documentation
@@ -150,9 +134,10 @@ Scheduled jobs use quiet monitor output by default.
   institution's acceptable-use rules.
 - It scrapes an undocumented ExtJS backend, so a site redesign or a switch to
   SSO-only login could require updates.
-- It does not OCR scanned attachments. Alerts use document metadata only.
+- It does not OCR scanned attachments. Reports use document metadata only.
 - VNU documents may be marked internal/confidential. Keep downloads on a machine
-  you control and prefer `--delete-after`; think before using `--send-files`.
+  you control and prefer `--delete-after`; review the destination before queueing
+  any file for external delivery.
 
 ## License
 

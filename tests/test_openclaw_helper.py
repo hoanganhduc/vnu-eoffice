@@ -52,14 +52,6 @@ class FakeLogin:
         return self.client
 
 
-class FakeNotifier:
-    def __init__(self):
-        self.messages = []
-
-    def send_message(self, text):
-        self.messages.append(text)
-
-
 class TestOpenClawHelper(unittest.TestCase):
     def test_default_fetch_pages_is_two(self):
         helper = load_helper()
@@ -114,14 +106,18 @@ class TestOpenClawHelper(unittest.TestCase):
         saved_docs = save_mapping.call_args.args[1]
         self.assertEqual([item.key for item in saved_docs], ["den:1", "den:2", "di:1", "di:2"])
 
-    def test_send_plain_text_strips_duplicate_title_before_notifier(self):
+    def test_direct_notifier_flags_and_imports_are_removed(self):
         helper = load_helper()
-        notifier = FakeNotifier()
+        source = HELPER_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("TelegramNotifier", source)
+        self.assertNotIn("--send-telegram", source)
+        self.assertNotIn("get_telegram_token", source)
 
-        with patch.object(helper, "titled_notifier", return_value=notifier):
-            helper.send_plain_text("Task: VNU eOffice latest documents\n\nBody", "Task: VNU eOffice latest documents")
-
-        self.assertEqual(notifier.messages, ["Body"])
+        args = helper.build_parser().parse_args(
+            ["download", "--item", "1", "--send-files"]
+        )
+        with self.assertRaisesRegex(ValueError, "explicit --delivery-target"):
+            helper._validate_delivery_args(args)
 
 
 if __name__ == "__main__":

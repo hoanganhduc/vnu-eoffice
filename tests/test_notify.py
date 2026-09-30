@@ -1,45 +1,30 @@
-"""Offline tests for Telegram response handling."""
-import os
+"""Offline tests for the fail-closed retired notification interface."""
 import unittest
-from unittest.mock import patch
+from pathlib import Path
 
-import requests
-
-from vnu_eoffice.notify import TelegramError, TelegramNotifier, load_chat_id
-
-
-class Response:
-    def __init__(self, data=None, http_error=None, json_error=None):
-        self.data = data if data is not None else {"ok": True, "result": {}}
-        self.http_error = http_error
-        self.json_error = json_error
-
-    def raise_for_status(self):
-        if self.http_error:
-            raise self.http_error
-
-    def json(self):
-        if self.json_error:
-            raise self.json_error
-        return self.data
+from vnu_eoffice.notify import TelegramError, TelegramNotifier, load_chat_id, save_chat_id
 
 
 class TestTelegramNotifier(unittest.TestCase):
-    def test_chat_id_uses_environment(self):
-        with patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "env-chat"}):
-            self.assertEqual(load_chat_id(), "env-chat")
+    def test_direct_notifier_construction_is_disabled(self):
+        with self.assertRaisesRegex(TelegramError, "host delivery queue"):
+            TelegramNotifier("untrusted-value", "untrusted-target")
 
-    def test_ok_false_raises(self):
-        with patch("vnu_eoffice.notify.requests.post",
-                   return_value=Response({"ok": False, "description": "Bad Request"})):
-            with self.assertRaisesRegex(TelegramError, "Bad Request"):
-                TelegramNotifier("token", "chat").send_message("hello")
+    def test_config_construction_is_disabled(self):
+        with self.assertRaisesRegex(TelegramError, "host delivery queue"):
+            TelegramNotifier.from_config()
 
-    def test_http_error_raises(self):
-        err = requests.HTTPError("boom")
-        with patch("vnu_eoffice.notify.requests.post", return_value=Response(http_error=err)):
-            with self.assertRaisesRegex(TelegramError, "request failed"):
-                TelegramNotifier("token", "chat").send_message("hello")
+    def test_chat_discovery_and_persistence_are_disabled(self):
+        self.assertIsNone(load_chat_id())
+        with self.assertRaisesRegex(TelegramError, "host delivery queue"):
+            save_chat_id("untrusted-target")
+
+    def test_module_has_no_network_sender_or_token_discovery(self):
+        source = (Path(__file__).parents[1] / "vnu_eoffice/notify.py").read_text()
+        config = (Path(__file__).parents[1] / "vnu_eoffice/config.py").read_text()
+        self.assertNotIn("requests", source)
+        self.assertNotIn("api.telegram.org", source)
+        self.assertNotIn("get_telegram_token", config)
 
 
 if __name__ == "__main__":
